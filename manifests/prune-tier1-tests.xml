@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tier 1 - Test suites.
+
+  CTS, VTS, MLTS and friends. Needed to certify a build against Google's
+  compatibility program. Not needed to build an image, and not needed to
+  boot one.
+
+  Saving: ~10 GB
+  Risk:   very low
+-->
+<manifest>
+  <remove-project name="platform/cts" />
+  <remove-project name="platform/test/vts" />
+  <remove-project name="platform/test/vts-testcase/hal" />
+  <remove-project name="platform/test/vts-testcase/kernel" />
+  <remove-project name="platform/test/mlts/benchmark" />
+  <remove-project name="platform/test/mlts/models" />
+  <remove-project name="platform/test/app_compat/csuite" />
+  <remove-project name="platform/test/catbox" />
+  <remove-project name="platform/test/suite_harness" />
+</manifest>

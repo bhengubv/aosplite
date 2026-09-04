@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tier 2 - Host toolchains for operating systems you are not building on.
+
+  AOSP ships prebuilt toolchains for Linux, macOS and (historically)
+  Windows hosts, plus several superseded JDKs. If you build on Linux you
+  carry the rest for nothing.
+
+  Do NOT add prebuilts/clang/host/linux-x86 here. That is the compiler.
+
+  Saving: ~15 GB
+  Risk:   low
+-->
+<manifest>
+  <remove-project name="platform/prebuilts/clang/host/darwin-x86" />
+  <remove-project name="platform/prebuilts/gcc/darwin-x86/host/headers" />
+  <remove-project name="platform/prebuilts/go/darwin-x86" />
+  <remove-project name="platform/prebuilts/jdk/jdk8" />
+  <remove-project name="platform/prebuilts/jdk/jdk9" />
+  <remove-project name="platform/prebuilts/jdk/jdk11" />
+  <remove-project name="platform/prebuilts/jdk/jdk17" />
+  <remove-project name="platform/prebuilts/fuchsia_sdk" />
+</manifest>

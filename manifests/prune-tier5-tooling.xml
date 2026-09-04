@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tier 5 - IDE tooling, SDK packaging, sample code, AndroidX source.
+
+  None of this is consumed by a platform build. frameworks/support is
+  AndroidX; platform builds use prebuilts, not this source tree.
+
+  Saving: ~8 GB
+  Risk:   medium - if you build apps out of this tree rather than just
+          the platform, you will want some of it back
+-->
+<manifest>
+  <remove-project name="platform/developers/build" />
+  <remove-project name="platform/developers/demos" />
+  <remove-project name="platform/developers/samples/android" />
+  <remove-project name="platform/sdk" />
+  <remove-project name="platform/tools/adt/idea" />
+  <remove-project name="platform/tools/base" />
+  <remove-project name="platform/tools/studio" />
+  <remove-project name="platform/frameworks/support" />
+</manifest>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tier 3 - Device and hardware trees for silicon you do not flash.
+
+  READ THIS BEFORE USING: this tier is target-specific. Every line below
+  removes support for a board or a vendor's HAL. Delete the lines that
+  cover your own hardware.
+
+  Reference points:
+    Pixel 6 / 6 Pro     needs device/google/raviole + gs101
+    Pixel 7             needs device/google/pantah + gs201
+    Qualcomm devices    need hardware/qcom/*
+
+  Saving: ~10 GB
+  Risk:   low, if you edit it for your target
+-->
+<manifest>
+  <remove-project name="device/amlogic/yukawa" />
+  <remove-project name="device/linaro/dragonboard" />
+  <remove-project name="device/linaro/hikey" />
+  <remove-project name="device/google/coral" />
+  <remove-project name="device/google/sunfish" />
+  <remove-project name="device/google/redbull" />
+  <remove-project name="device/google/bluejay" />
+  <remove-project name="device/google/felix" />
+  <remove-project name="device/google/lynx" />
+  <remove-project name="device/google/cheetah" />
+  <remove-project name="device/google/panther" />
+  <remove-project name="device/google/shusky" />
+  <remove-project name="device/google/akita" />
+  <remove-project name="hardware/broadcom/libbt" />
+  <remove-project name="hardware/knowles/athletico" />
+  <remove-project name="hardware/marvell/bt-vendor" />
+  <remove-project name="hardware/nxp/nfc" />
+  <remove-project name="hardware/nxp/secure_element" />
+</manifest>

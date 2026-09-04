@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tier 4 - Stock applications.
+
+  This tier is a TWO-PART change. Removing the project without also
+  removing the module from PRODUCT_PACKAGES fails the build with a
+  missing-module error. Both, or neither.
+
+  products/lite_arm64.mk in this repo does not pull these in. If you
+  bring your own product config, check it first.
+
+  Saving: ~3 GB
+  Risk:   medium - it is the product config that bites, not the removal
+-->
+<manifest>
+  <remove-project name="platform/packages/apps/Dialer" />
+  <remove-project name="platform/packages/apps/Messaging" />
+  <remove-project name="platform/packages/apps/Contacts" />
+  <remove-project name="platform/packages/apps/DeskClock" />
+  <remove-project name="platform/packages/apps/Gallery2" />
+  <remove-project name="platform/packages/apps/Calendar" />
+  <remove-project name="platform/packages/apps/Camera2" />
+  <remove-project name="platform/packages/apps/Browser2" />
+  <remove-project name="platform/packages/apps/Music" />
+  <remove-project name="platform/packages/apps/QuickSearchBox" />
+  <remove-project name="platform/packages/apps/Email" />
+  <remove-project name="platform/packages/apps/Launcher3" />
+</manifest>
