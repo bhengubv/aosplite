@@ -1,22 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Tier 1 - Test suites.
+  Tier 1 - Test suites and test harnesses.
 
-  CTS, VTS, MLTS and friends. Needed to certify a build against Google's
-  compatibility program. Not needed to build an image, and not needed to
-  boot one.
+  CTS, VTS, MTS and the harnesses that drive them. These certify a build
+  against the Google compatibility program. They are not inputs to a
+  build and they are not present on a device.
 
-  Saving: ~10 GB
+  If you intend to pursue GMS certification you need them back. Nothing
+  else in the tree depends on them.
+
+  Verified against android-15.0.0_r20.
+
+  Saving: ~12 GB
   Risk:   very low
 -->
 <manifest>
+  <!-- Compatibility and vendor test suites -->
   <remove-project name="platform/cts" />
+  <remove-project name="platform/test/cts-root" />
+  <remove-project name="platform/test/mts" />
   <remove-project name="platform/test/vts" />
   <remove-project name="platform/test/vts-testcase/hal" />
+  <remove-project name="platform/test/vts-testcase/hal-trace" />
   <remove-project name="platform/test/vts-testcase/kernel" />
-  <remove-project name="platform/test/mlts/benchmark" />
-  <remove-project name="platform/test/mlts/models" />
+  <remove-project name="platform/test/vts-testcase/nbu" />
+  <remove-project name="platform/test/vts-testcase/performance" />
+  <remove-project name="platform/test/vts-testcase/security" />
+  <remove-project name="platform/test/vts-testcase/vndk" />
   <remove-project name="platform/test/app_compat/csuite" />
   <remove-project name="platform/test/catbox" />
+  <remove-project name="platform/test/dittosuite" />
+  <remove-project name="platform/test/mlts/benchmark" />
+  <remove-project name="platform/test/mlts/models" />
+  <remove-project name="platform/test/robolectric-extensions" />
   <remove-project name="platform/test/suite_harness" />
+
+  <!-- Test harnesses and runners -->
+  <remove-project name="platform/tools/tradefederation" />
+  <remove-project name="platform/tools/tradefederation/contrib" />
+  <remove-project name="platform/tools/tradefederation/prebuilts" />
+  <remove-project name="platform/tools/loganalysis" />
+  <remove-project name="platform/tools/test/connectivity" />
+  <remove-project name="platform/tools/test/mobly_extensions" />
+  <remove-project name="platform/tools/test/mobly_snippets" />
+  <remove-project name="platform/tools/test/openhst" />
+  <remove-project name="kernel/tests" />
 </manifest>

@@ -66,13 +66,13 @@ Apply one at a time. Run `m nothing` between them - it runs the whole
 configuration and analysis pass without compiling anything, so a broken
 prune surfaces in minutes rather than hours.
 
-| Tier | Cut | Saves | Risk |
-|---|---|---|---|
-| 1 | Test suites - CTS, VTS, MLTS | ~10 GB | very low |
-| 2 | Darwin toolchains, superseded JDKs | ~15 GB | low |
-| 3 | Other vendors' hardware | ~10 GB | low |
-| 4 | Stock applications | ~3 GB | medium |
-| 5 | Samples, SDK, IDE tooling, AndroidX | ~8 GB | medium |
+| Tier | Cut | Entries | Saves | Risk |
+|---|---|---|---|---|
+| 1 | Test suites and harnesses - CTS, VTS, MTS, TradeFed | 27 | ~12 GB | very low |
+| 2 | Darwin toolchains, JDK 8, mingw cross-compiler | 5 | ~12 GB | low |
+| 3 | Device trees, vendor HALs, device kernels | 76 | ~15 GB | low |
+| 4 | Stock applications | 11 | ~3 GB | medium |
+| 5 | Samples, SDK packaging, emulator, app tooling | 14 | ~8 GB | medium |
 
 Tier 3 is target-specific. Every line removes support for a board or a
 vendor's HAL, so edit it for hardware you actually flash.
@@ -88,11 +88,16 @@ No error, no warning, no saving. Project names move between releases, so
 a prune list that worked last year can quietly stop working.
 
 ```
-tools/verify-manifest.sh /path/to/aosplite/manifests
+tools/verify-manifest.sh --tag android-15.0.0_r20
 ```
 
-Run from the root of a synced tree. Anything reported MISSING is a dead
-line.
+That fetches the release manifest from googlesource and needs no tree at
+all. From the root of a synced tree, run it with no arguments to check
+against `.repo/manifests/default.xml`. Anything reported MISSING is a
+dead line.
+
+All 133 entries in this repository are verified against
+`android-15.0.0_r20`: 1,035 real projects, 0 dead.
 
 ## Maintenance
 
@@ -134,12 +139,27 @@ repo init --mirror -u https://android.googlesource.com/platform/manifest
 
 ## Status
 
-Nothing here has been verified end to end. The prune tiers are derived
-from the structure of the AOSP manifest, not from a completed build, and
-`products/lite_arm64.mk` has never been booted. Treat every size figure
-as an estimate and every claim as untested until you test it.
+**Verified:** every project name resolves against the real
+`android-15.0.0_r20` manifest. 133 entries, 0 dead. Re-checkable in
+seconds with the command above.
 
-Corrections welcome. Promises are not made.
+**Not verified:** no tree has been synced with these tiers applied, no
+build has been run, and `products/lite_arm64.mk` has never been booted.
+The size figures are estimates, not measurements.
+
+So the names are known good and the outcome is not. Corrections welcome.
+Promises are not made.
+
+### Two things worth knowing before you look for them
+
+Android Studio (`tools/adt/idea`, `tools/base`) and AndroidX
+(`frameworks/support`) are **not in the AOSP platform manifest**. They
+live in separate manifests, so there is nothing to cut - they were never
+downloaded.
+
+`platform/development` is deliberately not pruned. It holds host tooling
+that parts of the build reference, and removing it produces a confusing
+failure rather than a saving.
 
 ## Licence
 

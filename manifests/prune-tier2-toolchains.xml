@@ -1,23 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Tier 2 - Host toolchains for operating systems you are not building on.
+  Tier 2 - Host toolchains for platforms you do not build on.
 
-  AOSP ships prebuilt toolchains for Linux, macOS and (historically)
-  Windows hosts, plus several superseded JDKs. If you build on Linux you
-  carry the rest for nothing.
+  AOSP ships prebuilt toolchains for Linux and macOS hosts, a Windows
+  cross-compiler for producing Windows SDK tools, and the superseded
+  JDK 8 alongside the JDK 21 the build actually uses.
 
-  Do NOT add prebuilts/clang/host/linux-x86 here. That is the compiler.
+  On a Linux builder producing a device image, the rest is inert.
 
-  Saving: ~15 GB
+  Not in this tier, and not to be added to it:
+    prebuilts/clang/host/linux-x86   the compiler
+    prebuilts/jdk/jdk21              the JDK the build uses
+    prebuilts/go/linux-x86           Soong is written in Go
+    prebuilts/build-tools            core build binaries
+    prebuilts/rust                   large parts of the platform are Rust
+
+  Verified against android-15.0.0_r20.
+
+  Saving: ~12 GB
   Risk:   low
 -->
 <manifest>
   <remove-project name="platform/prebuilts/clang/host/darwin-x86" />
-  <remove-project name="platform/prebuilts/gcc/darwin-x86/host/headers" />
   <remove-project name="platform/prebuilts/go/darwin-x86" />
+  <remove-project name="platform/prebuilts/bazel/darwin-x86_64" />
   <remove-project name="platform/prebuilts/jdk/jdk8" />
-  <remove-project name="platform/prebuilts/jdk/jdk9" />
-  <remove-project name="platform/prebuilts/jdk/jdk11" />
-  <remove-project name="platform/prebuilts/jdk/jdk17" />
-  <remove-project name="platform/prebuilts/fuchsia_sdk" />
+
+  <!-- Windows cross-compiler. Only needed to build Windows host tools
+       (the Windows SDK). Not needed for a device image. -->
+  <remove-project name="platform/prebuilts/gcc/linux-x86/host/x86_64-w64-mingw32-4.8" />
 </manifest>

@@ -1,21 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Tier 5 - IDE tooling, SDK packaging, sample code, AndroidX source.
+  Tier 5 - App-development tooling, SDK packaging, samples, emulator.
 
-  None of this is consumed by a platform build. frameworks/support is
-  AndroidX; platform builds use prebuilts, not this source tree.
+  None of this is consumed by a platform build producing a device image.
+  It is what you need in order to build applications, package an SDK, or
+  run the emulator.
+
+  Note on what is NOT here. Android Studio (tools/adt/idea, tools/base)
+  and AndroidX (frameworks/support) are not in the AOSP platform
+  manifest at all - they live in separate manifests. If you expected to
+  cut them, they were never downloaded in the first place.
+
+  platform/development is also deliberately absent. It holds host
+  tooling that parts of the build reference, and removing it is a good
+  way to produce a confusing failure.
+
+  Verified against android-15.0.0_r20.
 
   Saving: ~8 GB
-  Risk:   medium - if you build apps out of this tree rather than just
-          the platform, you will want some of it back
+  Risk:   medium - if you build apps from this tree, some comes back
 -->
 <manifest>
+  <!-- Sample code and SDK packaging -->
   <remove-project name="platform/developers/build" />
   <remove-project name="platform/developers/demos" />
   <remove-project name="platform/developers/samples/android" />
   <remove-project name="platform/sdk" />
-  <remove-project name="platform/tools/adt/idea" />
-  <remove-project name="platform/tools/base" />
-  <remove-project name="platform/tools/studio" />
-  <remove-project name="platform/frameworks/support" />
+
+  <!-- Emulator. Remove only if you boot-test on hardware or Cuttlefish. -->
+  <remove-project name="platform/prebuilts/android-emulator" />
+  <remove-project name="platform/prebuilts/qemu-kernel" />
+
+  <!-- App-build tooling -->
+  <remove-project name="platform/prebuilts/ndk" />
+  <remove-project name="platform/prebuilts/gradle-plugin" />
+  <remove-project name="platform/prebuilts/maven_repo/bumptech" />
+  <remove-project name="platform/prebuilts/cmdline-tools" />
+  <remove-project name="platform/prebuilts/devtools" />
+
+  <!-- Java linters. Not run by a platform build. -->
+  <remove-project name="platform/prebuilts/checkstyle" />
+  <remove-project name="platform/prebuilts/checkcolor" />
+  <remove-project name="platform/prebuilts/ktlint" />
 </manifest>

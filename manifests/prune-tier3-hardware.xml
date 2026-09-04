@@ -1,36 +1,120 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Tier 3 - Device and hardware trees for silicon you do not flash.
+  Tier 3 - Device trees, vendor HALs and kernels for hardware you do not
+  flash.
 
-  READ THIS BEFORE USING: this tier is target-specific. Every line below
-  removes support for a board or a vendor's HAL. Delete the lines that
-  cover your own hardware.
+  READ BEFORE USING. This tier is target-specific. Every line removes
+  support for real hardware and one of them may be yours. It is written
+  for a GSI build, which needs none of them: a GSI relies on the vendor
+  partition already present on the device.
 
-  Reference points:
-    Pixel 6 / 6 Pro     needs device/google/raviole + gs101
-    Pixel 7             needs device/google/pantah + gs201
-    Qualcomm devices    need hardware/qcom/*
+  Pairings, if you are building for a physical device:
 
-  Saving: ~10 GB
-  Risk:   low, if you edit it for your target
+    Pixel 6 / 6 Pro    device/google/raviole + raviole-kernels/6.1
+                       device/google/gs101 + gs101-sepolicy
+                       platform/hardware/google/graphics/gs101
+    Pixel 7 / 7 Pro    device/google/pantah + pantah-kernels/6.1
+                       device/google/gs201 + gs201-sepolicy
+                       platform/hardware/google/graphics/gs201
+    Pixel 8 / 9        device/google/shusky | akita | caimito | comet
+                       device/google/zuma | zumapro + sepolicy
+    Any Pixel          platform/hardware/google/pixel
+                       platform/hardware/google/pixel-sepolicy
+                       device/google/gs-common
+    Qualcomm           platform/hardware/qcom/wlan
+
+  Cuttlefish (device/google/cuttlefish and friends) is the AOSP virtual
+  device and is deliberately NOT removed here. It is how you boot-test a
+  build without physical hardware. Remove it yourself if you have no use
+  for it.
+
+  Verified against android-15.0.0_r20.
+
+  Saving: ~15 GB
+  Risk:   low if edited for your target, high if applied blind
 -->
 <manifest>
-  <remove-project name="device/amlogic/yukawa" />
-  <remove-project name="device/linaro/dragonboard" />
-  <remove-project name="device/linaro/hikey" />
-  <remove-project name="device/google/coral" />
-  <remove-project name="device/google/sunfish" />
-  <remove-project name="device/google/redbull" />
-  <remove-project name="device/google/bluejay" />
-  <remove-project name="device/google/felix" />
-  <remove-project name="device/google/lynx" />
-  <remove-project name="device/google/cheetah" />
-  <remove-project name="device/google/panther" />
-  <remove-project name="device/google/shusky" />
+  <!-- Google reference devices -->
   <remove-project name="device/google/akita" />
-  <remove-project name="hardware/broadcom/libbt" />
-  <remove-project name="hardware/knowles/athletico" />
-  <remove-project name="hardware/marvell/bt-vendor" />
-  <remove-project name="hardware/nxp/nfc" />
-  <remove-project name="hardware/nxp/secure_element" />
+  <remove-project name="device/google/akita-kernels/6.1" />
+  <remove-project name="device/google/akita-sepolicy" />
+  <remove-project name="device/google/bluejay" />
+  <remove-project name="device/google/bluejay-kernels/6.1" />
+  <remove-project name="device/google/bluejay-sepolicy" />
+  <remove-project name="device/google/caimito" />
+  <remove-project name="device/google/caimito-kernels/6.1" />
+  <remove-project name="device/google/caimito-sepolicy" />
+  <remove-project name="device/google/comet" />
+  <remove-project name="device/google/comet-kernels/6.1" />
+  <remove-project name="device/google/comet-sepolicy" />
+  <remove-project name="device/google/felix" />
+  <remove-project name="device/google/felix-kernels/6.1" />
+  <remove-project name="device/google/felix-sepolicy" />
+  <remove-project name="device/google/lynx" />
+  <remove-project name="device/google/lynx-kernels/6.1" />
+  <remove-project name="device/google/lynx-sepolicy" />
+  <remove-project name="device/google/pantah" />
+  <remove-project name="device/google/pantah-kernels/6.1" />
+  <remove-project name="device/google/pantah-sepolicy" />
+  <remove-project name="device/google/raviole" />
+  <remove-project name="device/google/raviole-kernels/6.1" />
+  <remove-project name="device/google/shusky" />
+  <remove-project name="device/google/shusky-kernels/6.1" />
+  <remove-project name="device/google/shusky-sepolicy" />
+  <remove-project name="device/google/tangorpro" />
+  <remove-project name="device/google/tangorpro-kernels/6.1" />
+  <remove-project name="device/google/tangorpro-sepolicy" />
+
+  <!-- Google SoC support -->
+  <remove-project name="device/google/gs101" />
+  <remove-project name="device/google/gs101-sepolicy" />
+  <remove-project name="device/google/gs201" />
+  <remove-project name="device/google/gs201-sepolicy" />
+  <remove-project name="device/google/zuma" />
+  <remove-project name="device/google/zuma-sepolicy" />
+  <remove-project name="device/google/zumapro" />
+  <remove-project name="device/google/zumapro-sepolicy" />
+  <remove-project name="device/google/gs-common" />
+  <remove-project name="device/google/contexthub" />
+  <remove-project name="device/google/common/etm" />
+
+  <!-- Other form factors and reference boards -->
+  <remove-project name="device/google/atv" />
+  <remove-project name="device/google/trout" />
+  <remove-project name="device/google_car" />
+  <remove-project name="device/generic/car" />
+  <remove-project name="device/amlogic/yukawa" />
+  <remove-project name="device/amlogic/yukawa-kernel" />
+  <remove-project name="device/linaro/dragonboard" />
+  <remove-project name="device/linaro/dragonboard-kernel" />
+  <remove-project name="device/linaro/hikey" />
+  <remove-project name="device/linaro/hikey-kernel" />
+  <remove-project name="device/linaro/poplar" />
+  <remove-project name="device/linaro/poplar-kernel" />
+  <remove-project name="device/sample" />
+
+  <!-- Vendor HALs -->
+  <remove-project name="platform/hardware/broadcom/libbt" />
+  <remove-project name="platform/hardware/broadcom/wlan" />
+  <remove-project name="platform/hardware/invensense" />
+  <remove-project name="platform/hardware/nxp/keymint" />
+  <remove-project name="platform/hardware/nxp/nfc" />
+  <remove-project name="platform/hardware/nxp/secure_element" />
+  <remove-project name="platform/hardware/nxp/uwb" />
+  <remove-project name="platform/hardware/nxp/weaver" />
+  <remove-project name="platform/hardware/qcom/wlan" />
+  <remove-project name="platform/hardware/samsung/nfc" />
+  <remove-project name="platform/hardware/st/nfc" />
+  <remove-project name="platform/hardware/st/secure_element" />
+  <remove-project name="platform/hardware/st/secure_element2" />
+  <remove-project name="platform/hardware/synaptics/wlan" />
+  <remove-project name="platform/hardware/ti/am57x" />
+  <remove-project name="platform/hardware/google/camera" />
+  <remove-project name="platform/hardware/google/gchips" />
+  <remove-project name="platform/hardware/google/graphics/gs101" />
+  <remove-project name="platform/hardware/google/graphics/gs201" />
+  <remove-project name="platform/hardware/google/graphics/zuma" />
+  <remove-project name="platform/hardware/google/graphics/zumapro" />
+  <remove-project name="platform/hardware/google/pixel" />
+  <remove-project name="platform/hardware/google/pixel-sepolicy" />
 </manifest>
