@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AOSP declares android.hardware.type.automotive in
+  frameworks/native/data/etc/android.hardware.type.automotive.xml and
+  android.hardware.type.pc inline inside pc_core_hardware.xml.
+
+  It declares no equivalent for watches. wearable_core_hardware.xml
+  describes wearable hardware - sensors, bluetooth, touchscreen - but
+  never states the device type, and there is no
+  android.hardware.type.watch.xml anywhere in the tree.
+
+  The constant itself is real. PackageManager.FEATURE_WATCH is
+  "android.hardware.type.watch", the framework switches on it, and
+  Configuration.UI_MODE_TYPE_WATCH plus the -watch resource qualifier
+  both key off a device declaring it. Nothing declares it because no
+  AOSP product is a watch.
+
+  So the product has to. This file is that declaration.
+
+  Verified absent from frameworks/native/data/etc at android-15.0.0_r20:
+  151 feature XML files, none matching type.watch.
+-->
+<permissions>
+    <feature name="android.hardware.type.watch" />
+</permissions>

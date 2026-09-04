@@ -18,7 +18,7 @@ No promises. Use it, or don't.
 | | |
 |---|---|
 | `manifests/` | Five prune tiers, plus one opt-in extra |
-| `products/` | An optional trimmed `lunch` target |
+| `products/` | Three optional `lunch` targets: generic, watch, desktop |
 | `tools/` | Init, verification, per-release maintenance |
 | `docs/` | What was cut and why |
 
@@ -60,6 +60,11 @@ lunch lite_arm64-trunk_staging-userdebug
 m systemimage
 ```
 
+The other two targets are `watch_arm64-trunk_staging-userdebug` and
+`desktop_x86_64-trunk_staging-userdebug`. The destination path
+`device/aosplite` matters - `watch_arm64.mk` copies a permissions file
+from it.
+
 ## Tiers
 
 Apply one at a time. Run `m nothing` between them - it runs the whole
@@ -92,8 +97,8 @@ TV and Automotive alongside handheld, and all of them stay:
 | Handheld, tablet | yes | `aosp_arm64`, `handheld_system.mk`, `large_screen_common.mk` |
 | TV | yes | `aosp_tv_arm64`, `aosp_tv_x86`, `gsi_tv_*`, `sdk_atv*` |
 | Automotive | yes | `gsi_car_arm64`, `gsi_car_x86_64`, `sdk_car_*` |
-| Watch | **no** | Wear OS is proprietary. No AOSP product. |
-| Desktop | **no** | No product target. |
+| Watch | partly | No product. Profile and framework support exist - see below. |
+| Desktop | partly | No product. Profile and framework support exist - see below. |
 
 Verified against `android-15.0.0_r20` - the Automotive targets are
 `gsi_car_*` and `sdk_car_*`; there is no `aosp_car_*`.
@@ -102,11 +107,40 @@ Verified against `android-15.0.0_r20` - the Automotive targets are
 product trees for a phone-only tree. It is opt-in, not part of the
 numbered tiers, and `tools/init.sh` does not install it.
 
-Worth knowing if you intend to add a form factor AOSP does not ship: the
-`atv_*` stack in `device/google/atv/products` is the only worked example
-of one layered cleanly on `base_system`. `atv_system.mk` sits beside
-`handheld_system.mk` and does the same job for a different device class.
-That is the template to copy.
+### Watch and desktop
+
+"Not in AOSP" is the usual summary and it is too blunt. What is missing
+is the product, not the support. Verified at `android-15.0.0_r20`:
+
+| | Watch | Desktop |
+|---|---|---|
+| Hardware profile | `wearable_core_hardware.xml` | `pc_core_hardware.xml` |
+| Device type constant | `android.hardware.type.watch` exists in the framework but **nothing declares it** | `android.hardware.type.pc`, declared inline in the profile |
+| Windowing | `-watch` resource qualifier, `UI_MODE_TYPE_WATCH` | `android.software.freeform_window_management`, `activities_on_secondary_displays`, `window_extensions.mk` |
+| Product makefile | none | none |
+| Shell | none | none |
+
+`products/watch_arm64.mk` and `products/desktop_x86_64.mk` supply the
+missing product layer. Both are modelled on
+`device/google/atv/products/atv_system.mk`, the only worked example in
+AOSP of a form factor layered on the shared base.
+
+The watch one also ships
+`products/permissions/android.hardware.type.watch.xml`, because AOSP
+declares the automotive and PC device types but never the watch type -
+no AOSP product is a watch, so nothing had reason to.
+
+What neither supplies is a shell. No watch face, no launcher, no
+taskbar, no window chrome. Both will boot and show nothing. That is the
+expected result and it is stated in the files. The remaining work is at
+the app layer, on a system that runs - which is a different problem from
+platform bring-up.
+
+For desktop there is a further limit worth stating plainly:
+`desktop_x86_64` targets `generic_x86_64`, so it is an emulator or VM
+image. Real PC hardware - storage controllers, GPU, wifi, ACPI, suspend
+- is what Android-x86 and Bliss OS exist for and none of it is in
+AOSP.
 
 ## The silent failure
 
