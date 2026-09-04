@@ -154,8 +154,14 @@ done
 # ---------------------------------------------------------------------
 # Apply the config
 # ---------------------------------------------------------------------
+# The mounted filesystem is owned by root, so the edit is done on a copy
+# in the work directory and installed back with sudo. Editing in place
+# would need the whole script to run as root, which is a bigger hammer
+# than this needs.
 say "Applying properties"
-python3 - "$WORK/cfg.json" "$SYS/build.prop" <<'PYEOF'
+sudo cp "$SYS/build.prop" "$WORK/build.prop"
+sudo chown "$(id -u):$(id -g)" "$WORK/build.prop"
+python3 - "$WORK/cfg.json" "$WORK/build.prop" <<'PYEOF'
 import json, sys, time
 cfg = json.load(open(sys.argv[1]))
 props = cfg.get("properties") or {}
@@ -190,6 +196,10 @@ open(target, "w").write("\n".join(lines) + "\n")
 print("  %d replaced, %d added" % (replaced, added))
 print("  ro.build.display.id=%s-%s" % (cfg["name"], time.strftime("%Y%m%d")))
 PYEOF
+
+sudo cp "$WORK/build.prop" "$SYS/build.prop"
+sudo chown 0:0 "$SYS/build.prop"
+sudo chmod 644 "$SYS/build.prop"
 
 say "Removing apps"
 python3 -c "
