@@ -17,7 +17,7 @@ No promises. Use it, or don't.
 
 | | |
 |---|---|
-| `manifests/` | Five prune tiers as repo local manifests |
+| `manifests/` | Five prune tiers, plus one opt-in extra |
 | `products/` | An optional trimmed `lunch` target |
 | `tools/` | Init, verification, per-release maintenance |
 | `docs/` | What was cut and why |
@@ -70,16 +70,43 @@ prune surfaces in minutes rather than hours.
 |---|---|---|---|---|
 | 1 | Test suites and harnesses - CTS, VTS, MTS, TradeFed | 27 | ~12 GB | very low |
 | 2 | Darwin toolchains, JDK 8, mingw cross-compiler | 5 | ~12 GB | low |
-| 3 | Device trees, vendor HALs, device kernels | 76 | ~15 GB | low |
+| 3 | Device trees, vendor HALs, device kernels | 73 | ~14 GB | low |
 | 4 | Stock applications | 11 | ~3 GB | medium |
 | 5 | Samples, SDK packaging, emulator, app tooling | 14 | ~8 GB | medium |
 
 Tier 3 is target-specific. Every line removes support for a board or a
-vendor's HAL, so edit it for hardware you actually flash.
+vendor's HAL, so edit it for hardware you actually flash. Cuttlefish is
+left in - it is how you boot-test without hardware.
 
 Tier 4 is a two-part change: remove the project *and* the module from
 `PRODUCT_PACKAGES`, or the build fails looking for something that is no
 longer there.
+
+## Form factors
+
+The tiers do not touch form-factor support. AOSP ships product trees for
+TV and Automotive alongside handheld, and all of them stay:
+
+| Form factor | In AOSP 15 | Targets |
+|---|---|---|
+| Handheld, tablet | yes | `aosp_arm64`, `handheld_system.mk`, `large_screen_common.mk` |
+| TV | yes | `aosp_tv_arm64`, `aosp_tv_x86`, `gsi_tv_*`, `sdk_atv*` |
+| Automotive | yes | `gsi_car_arm64`, `gsi_car_x86_64`, `sdk_car_*` |
+| Watch | **no** | Wear OS is proprietary. No AOSP product. |
+| Desktop | **no** | No product target. |
+
+Verified against `android-15.0.0_r20` - the Automotive targets are
+`gsi_car_*` and `sdk_car_*`; there is no `aosp_car_*`.
+
+`manifests/optional-formfactors.xml` removes the TV and Automotive
+product trees for a phone-only tree. It is opt-in, not part of the
+numbered tiers, and `tools/init.sh` does not install it.
+
+Worth knowing if you intend to add a form factor AOSP does not ship: the
+`atv_*` stack in `device/google/atv/products` is the only worked example
+of one layered cleanly on `base_system`. `atv_system.mk` sits beside
+`handheld_system.mk` and does the same job for a different device class.
+That is the template to copy.
 
 ## The silent failure
 
@@ -96,8 +123,9 @@ all. From the root of a synced tree, run it with no arguments to check
 against `.repo/manifests/default.xml`. Anything reported MISSING is a
 dead line.
 
-All 133 entries in this repository are verified against
-`android-15.0.0_r20`: 1,035 real projects, 0 dead.
+All 133 entries in this repository - 130 across the five tiers, 3 in the
+optional file - are verified against `android-15.0.0_r20`: 1,035 real
+projects, 0 dead.
 
 ## Maintenance
 

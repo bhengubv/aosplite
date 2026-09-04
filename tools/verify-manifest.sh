@@ -53,7 +53,7 @@ echo
 rc=0
 total=0
 dead=0
-for f in "$MANIFEST_DIR"/prune-*.xml; do
+for f in "$MANIFEST_DIR"/prune-*.xml "$MANIFEST_DIR"/optional-*.xml; do
     [ -e "$f" ] || continue
     n=0; m=0
     while IFS= read -r name; do

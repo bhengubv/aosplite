@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OPTIONAL - form-factor product trees.
+
+  Not part of the numbered tiers, and not installed by tools/init.sh.
+  Copy it into .repo/local_manifests/ only if you are certain you want a
+  phone-only tree.
+
+  What these actually are
+  -----------------------
+  These are not hardware support. They are the product definitions for
+  entire form factors, and each carries lunch targets:
+
+    device/google/atv       aosp_tv_arm64, aosp_tv_x86, gsi_tv_arm64,
+                            gsi_tv_arm, sdk_atv64_arm64, sdk_atv_x86
+                            plus the atv_* layering stack: atv_base,
+                            atv_system, atv_system_ext, atv_product,
+                            atv_vendor, atv_generic_system
+
+    device/generic/car      gsi_car_arm64, gsi_car_x86_64,
+                            sdk_car_arm64, sdk_car_x86_64,
+                            sdk_car_md_arm64, sdk_car_md_x86_64,
+                            sdk_car_cw_x86_64
+
+    device/google_car       Google car reference device
+
+  Why you might want to keep them
+  -------------------------------
+  The atv_* stack is the only worked example in AOSP of a form factor
+  layered cleanly on base_system - atv_system.mk sits beside
+  handheld_system.mk and does the same job for a different device class.
+  If you are adding a form factor that AOSP does not ship (Wear OS is
+  proprietary and absent; there is no desktop product), that stack is
+  the template you would copy.
+
+  What is NOT here
+  ----------------
+  The applications and services for these form factors live elsewhere
+  and are never pruned by this repository:
+
+    platform/packages/services/Car          the Automotive service
+    platform/packages/apps/Car/*            29 Automotive applications
+    platform/frameworks/opt/car/services
+    platform/packages/apps/TV, TvSettings, TvSystemUI
+    platform/packages/providers/TvProvider
+    platform/frameworks/opt/tv/tvsystem
+    platform/packages/inputmethods/LeanbackIME
+
+  Removing the product trees below without also removing those leaves
+  the code in place and only the lunch targets gone.
+
+  Verified against android-15.0.0_r20.
+
+  Saving: ~1 GB
+  Risk:   high if you later want TV or Automotive - you lose the targets
+-->
+<manifest>
+  <remove-project name="device/google/atv" />
+  <remove-project name="device/generic/car" />
+  <remove-project name="device/google_car" />
+</manifest>

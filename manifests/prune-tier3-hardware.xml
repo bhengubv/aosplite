@@ -23,14 +23,20 @@
                        device/google/gs-common
     Qualcomm           platform/hardware/qcom/wlan
 
+  Two things are deliberately NOT removed here.
+
   Cuttlefish (device/google/cuttlefish and friends) is the AOSP virtual
-  device and is deliberately NOT removed here. It is how you boot-test a
-  build without physical hardware. Remove it yourself if you have no use
-  for it.
+  device. It is how you boot-test a build without physical hardware.
+
+  Form-factor product trees - device/google/atv, device/generic/car,
+  device/google_car - are products, not hardware support. They carry the
+  TV and Automotive lunch targets. Removing them narrows what you can
+  build rather than what you can flash, so they live in
+  optional-formfactors.xml instead.
 
   Verified against android-15.0.0_r20.
 
-  Saving: ~15 GB
+  Saving: ~14 GB
   Risk:   low if edited for your target, high if applied blind
 -->
 <manifest>
@@ -78,11 +84,15 @@
   <remove-project name="device/google/contexthub" />
   <remove-project name="device/google/common/etm" />
 
-  <!-- Other form factors and reference boards -->
-  <remove-project name="device/google/atv" />
+  <!-- Reference boards.
+
+       Form-factor product trees are deliberately NOT removed here.
+       device/google/atv (TV), device/generic/car and device/google_car
+       (Automotive) carry the aosp_tv_*, gsi_tv_*, gsi_car_* and
+       sdk_car_* products. Cutting them removes whole form factors, not
+       hardware support. See optional-formfactors.xml if that is what
+       you want. -->
   <remove-project name="device/google/trout" />
-  <remove-project name="device/google_car" />
-  <remove-project name="device/generic/car" />
   <remove-project name="device/amlogic/yukawa" />
   <remove-project name="device/amlogic/yukawa-kernel" />
   <remove-project name="device/linaro/dragonboard" />
