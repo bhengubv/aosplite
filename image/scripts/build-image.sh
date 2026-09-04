@@ -94,9 +94,37 @@ resize2fs "$WORK/system.img" >/dev/null
 df_before=$(stat -c%s "$WORK/system.img")
 echo "  $((CUR/1024/1024)) MB -> $((df_before/1024/1024)) MB"
 
+# An AOSP system image is not an ordinary ext4 filesystem. It is built
+# to be read-only forever, and two features enforce that:
+#
+#   shared_blocks   identical blocks across different files point at the
+#                   same physical block. It makes the image smaller and
+#                   it makes the filesystem unwritable - the kernel
+#                   refuses a rw mount outright.
+#
+#   read-only       a superblock flag saying exactly what it says.
+#
+# Both can be cleared. e2fsck -E unshare_blocks walks the filesystem and
+# gives every shared block its own copy, which is why the image had to be
+# grown first - un-sharing needs somewhere to put the copies.
+say "Clearing read-only filesystem features"
+echo "  features before:"
+dumpe2fs -h "$WORK/system.img" 2>/dev/null | grep -i "^Filesystem features" | sed 's/^/    /'
+
+e2fsck -E unshare_blocks -fy "$WORK/system.img" >/dev/null 2>&1 || true
+tune2fs -O ^read-only "$WORK/system.img" >/dev/null 2>&1 || true
+e2fsck -fy "$WORK/system.img" >/dev/null 2>&1 || true
+
+echo "  features after:"
+dumpe2fs -h "$WORK/system.img" 2>/dev/null | grep -i "^Filesystem features" | sed 's/^/    /'
+
 say "Mounting"
 mkdir -p "$WORK/mnt"
-sudo mount -o loop,rw "$WORK/system.img" "$WORK/mnt"
+if ! sudo mount -t ext4 -o loop,rw "$WORK/system.img" "$WORK/mnt"; then
+    echo "error: mount failed. Superblock detail follows." >&2
+    dumpe2fs -h "$WORK/system.img" >&2 2>/dev/null || true
+    exit 1
+fi
 
 # Two layouts exist. On some images the mount point is the root of the
 # system partition and build.prop sits at ./build.prop. On others the
