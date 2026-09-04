@@ -21,6 +21,7 @@ No promises. Use it, or don't.
 | `products/` | Three optional `lunch` targets: generic, watch, desktop |
 | `tools/` | Init, verification, per-release maintenance |
 | `docs/` | What was cut and why |
+| `SETUP.md` | Building AOSP from nothing, if you have not before |
 
 The manifests and the product are independent. Take the prune list and
 bring your own product config, or take the product and prune nothing.
@@ -36,6 +37,11 @@ bring your own product config, or take the product and prune nothing.
 Approximate, and they move with each release.
 
 ## Use
+
+If you have never built AOSP, start with [SETUP.md](SETUP.md). It covers
+host packages, the `repo` tool, disk and RAM requirements, the WSL2
+filesystem trap, ccache, and what each common failure means. This
+section assumes you are past that.
 
 ```
 git clone https://github.com/<you>/aosplite
