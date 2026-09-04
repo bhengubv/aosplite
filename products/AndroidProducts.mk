@@ -10,9 +10,12 @@
 # line will not resolve.
 
 PRODUCT_MAKEFILES := \
+    $(LOCAL_DIR)/lite_arm64.mk \
     $(LOCAL_DIR)/watch_arm64.mk \
     $(LOCAL_DIR)/desktop_x86_64.mk
 
 COMMON_LUNCH_CHOICES := \
+    lite_arm64-trunk_staging-userdebug \
+    lite_arm64-trunk_staging-user \
     watch_arm64-trunk_staging-userdebug \
     desktop_x86_64-trunk_staging-userdebug
