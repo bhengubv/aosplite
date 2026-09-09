@@ -70,6 +70,58 @@ alternative.
 
 ---
 
+## The targets in this repository do not fit path 1
+
+Worth saying plainly, because it is the first thing a reader will try.
+
+`lite_arm64` sets `PRODUCT_DEVICE := generic_arm64` and inherits
+`generic_system.mk`. It is a **system image only** - a GSI. `launch_cvd`
+expects a Cuttlefish product, which builds a matching vendor, boot and
+vendor_boot alongside the system image. Point it at a `lite_arm64` build
+and there is nothing for it to boot.
+
+The same is true of `watch_arm64` and `desktop_x86_64`.
+
+So there are three honest options, in increasing order of effort:
+
+**Build a Cuttlefish product instead.** `lunch aosp_cf_arm64_phone`, then
+`launch_cvd`. You lose the pruned product config - the tiers still apply,
+because they prune the *tree*, not the product - but you get a running
+system with one command. This is the right first move for anyone who has
+not booted AOSP before.
+
+**Mix the two.** `assemble_cvd` takes a comma-separated list:
+
+```bash
+launch_cvd --system_image_dir=out/target/product/vsoc_arm64,out/target/product/generic_arm64
+```
+
+It composes `super` from more than one product out directory, which is
+how Cuttlefish runs a GSI over its own vendor. The flag is real - it is
+declared in `host/commands/assemble_cvd/flags.cc` and split on commas -
+but **it has not been run for this document**, and the argument order and
+exact directory expectations are not documented here because they were
+not tested.
+
+**Assemble the disk yourself.** Path 2 below. This works, and it is what
+was measured, but it is a day of work and every one of the traps in the
+next section is waiting in it.
+
+### What is actually missing
+
+A Cuttlefish flavour of the lite target - a `lite_cf_arm64.mk` inheriting
+`device/google/cuttlefish/vsoc_arm64` - would collapse all of the above
+into `lunch`, `m`, `launch_cvd`. It does not exist in this repository. If
+you write one and boot it, that is the single most useful contribution
+here.
+
+Also worth knowing before you spend an evening: `lite_arm64` drops
+`handheld_system_ext.mk`, `telephony_system_ext.mk` and
+`aosp_product.mk`. It boots to a shell and adb. There is no launcher and
+no phone UI, so a black screen is the expected result, not a failure.
+
+---
+
 ## Path 2 - QEMU by hand
 
 Use this when the guest architecture is not the host's, when there is no

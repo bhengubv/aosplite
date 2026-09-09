@@ -86,6 +86,13 @@ the other is the part nobody writes down. Two routes -
   release, unselected multi-install APEXes, an `odm` symlink loop, and
   four more. Each one hangs the boot with no error.
 
+**The three targets here are system images, not devices.** `launch_cvd`
+wants a Cuttlefish product and finds nothing to boot in a `lite_arm64`
+output. Building `aosp_cf_arm64_phone` instead is the honest first move -
+the prune tiers still apply, because they trim the tree rather than the
+product. The gap and the two ways round it are in the emulator document;
+what would close it is a `lite_cf_arm64.mk`, which nobody has written.
+
 ## Tiers
 
 Apply one at a time. Run `m nothing` between them - it runs the whole
@@ -229,6 +236,13 @@ seconds with the command above.
 **Not verified:** no tree has been synced with these tiers applied, no
 build has been run, and `products/lite_arm64.mk` has never been booted.
 The size figures are estimates, not measurements.
+
+**Verified separately:** the QEMU path in
+[docs/EMULATOR.md](docs/EMULATOR.md), on a different tree - an arm64 GSI
+booting to `sys.boot_completed=1` against a Cuttlefish vendor of the same
+release, under TCG on an x86-64 host. That says the emulator procedure
+works. It says nothing about the targets in this repository, which remain
+unbuilt.
 
 So the names are known good and the outcome is not. Corrections welcome.
 Promises are not made.
