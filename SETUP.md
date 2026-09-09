@@ -325,6 +325,9 @@ real build.
 m nothing
 ```
 
+When the build produces images, running them is a separate job with its
+own set of traps - see [docs/EMULATOR.md](docs/EMULATOR.md).
+
 ---
 
 ## What failure looks like

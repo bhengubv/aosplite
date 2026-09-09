@@ -20,7 +20,8 @@ No promises. Use it, or don't.
 | `manifests/` | Five prune tiers, plus one opt-in extra |
 | `products/` | Three optional `lunch` targets: generic, watch, desktop |
 | `tools/` | Init, verification, per-release maintenance |
-| `docs/` | What was cut and why |
+| `docs/RATIONALE.md` | What was cut and why |
+| `docs/EMULATOR.md` | Running what you built, on Cuttlefish or raw QEMU |
 | `SETUP.md` | Building AOSP from nothing, if you have not before |
 
 The manifests and the product are independent. Take the prune list and
@@ -70,6 +71,20 @@ The other two targets are `watch_arm64-trunk_staging-userdebug` and
 `desktop_x86_64-trunk_staging-userdebug`. The destination path
 `device/aosplite` matters - `watch_arm64.mk` copies a permissions file
 from it.
+
+## Running what you built
+
+A `system.img` on disk is not a running system, and getting from one to
+the other is the part nobody writes down. Two routes -
+[docs/EMULATOR.md](docs/EMULATOR.md) covers both:
+
+- **Cuttlefish** (`lunch aosp_cf_arm64_phone`, then `launch_cvd`) when
+  the host and the target are the same architecture and you have KVM.
+- **QEMU by hand** when they are not. Slower, entirely manual, and the
+  document is mostly the list of things that stop it booting - the
+  missing DMA-BUF heap module, a vendor image from the wrong Android
+  release, unselected multi-install APEXes, an `odm` symlink loop, and
+  four more. Each one hangs the boot with no error.
 
 ## Tiers
 
