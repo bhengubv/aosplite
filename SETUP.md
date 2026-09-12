@@ -373,15 +373,24 @@ m
 - `source build/envsetup.sh` defines `m`, `lunch` and friends. It only
   affects the current shell - open a new terminal and you do it again.
 - `lunch` picks the product and variant, in the form
-  `<product>-<release>-<variant>`. **The release field matters.**
-  `trunk_staging` is the in-development configuration: it stamps the image
-  as pre-release, and a pre-release system will not boot against a retail
-  device's vendor partition. The symptoms in the built image are
-  `ro.build.version.codename=<codename>` rather than `REL`,
-  `ro.build.version.preview_sdk=1`, and an `ro.llndk.api_level` one
-  release ahead of the device. Use a released config - `bp4a`, `bp2a`,
-  `ap4a` and so on; `ls build/release/flag_values/` lists what your tree
-  has. Google's own GSIs are built this way.
+  `<product>-<release>-<variant>`. **The middle field decides whether your
+  image can run on real hardware**, and it is the easiest thing here to get
+  quietly wrong:
+
+  | Config | Correct when |
+  |---|---|
+  | `trunk_staging` | The vendor half comes from the same build - Cuttlefish, the emulator, a full device build. Nothing can mismatch. |
+  | released: `bp4a`, `bp2a`, `ap4a`, ... | The image runs against a vendor partition you did not build - any retail phone. |
+
+  `trunk_staging` is the in-development configuration and stamps the image
+  as pre-release: `ro.build.version.codename` is the codename rather than
+  `REL`, `ro.build.version.preview_sdk=1`, and `ro.llndk.api_level` is one
+  release ahead of the device. A retail device refuses that and bootloops.
+
+  What makes this expensive is that the same image boots perfectly on
+  Cuttlefish, so the target looks fine right up until you flash a phone.
+  `ls build/release/flag_values/` lists what your tree has. Google's own
+  GSIs are built from a released config.
 - `m` builds. `m -j8` sets parallelism; bare `m` picks a number itself.
 
 For the targets in this repository:
@@ -391,15 +400,7 @@ cp -r /path/to/aosplite/products device/aosplite
 ```
 
 ```bash
-source build/envsetup.sh
-```
-
-```bash
-lunch lite_arm64-trunk_staging-userdebug
-```
-
-```bash
-m systemimage
+/path/to/aosplite/tools/build.sh lite_arm64-bp4a-userdebug systemimage
 ```
 
 **Time: hours.** A full build is 1-3 hours on a large machine and

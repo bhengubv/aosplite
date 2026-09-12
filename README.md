@@ -46,9 +46,17 @@ section assumes you are past that.
 
 ```
 git clone https://github.com/<you>/aosplite
-aosplite/tools/init.sh ~/android android-15.0.0_r20
+aosplite/tools/init.sh ~/android android-16.0.0_r4
 cd ~/android
-repo sync -c -j4 --no-clone-bundle --prune
+repo sync -c -j$(nproc) --no-clone-bundle --prune
+```
+
+Any release tag works - see *Branch portability*. Then check the pruned
+tree before committing hours to a build:
+
+```
+aosplite/tools/preflight.sh ~/android
+aosplite/tools/check-modules.sh ~/android
 ```
 
 Half the saving is the shallow init and needs no manifest at all:
@@ -62,15 +70,31 @@ Then, if you want the trimmed target:
 
 ```
 cp -r aosplite/products device/aosplite
-source build/envsetup.sh
-lunch lite_arm64-trunk_staging-userdebug
-m systemimage
+aosplite/tools/build.sh lite_arm64-bp4a-userdebug systemimage
 ```
 
-The other two targets are `watch_arm64-trunk_staging-userdebug` and
-`desktop_x86_64-trunk_staging-userdebug`. The destination path
-`device/aosplite` matters - `watch_arm64.mk` copies a permissions file
-from it.
+`build.sh` sets the environment a pruned tree needs - including
+`ALLOW_MISSING_DEPENDENCIES`, without which Soong panics - and leaves
+`USE_CCACHE` alone. You can do it by hand with `source build/envsetup.sh`
+and `lunch`, but then the environment is yours to get right every time.
+
+The other two targets are `watch_arm64` and `desktop_x86_64`. The
+destination path `device/aosplite` matters - `watch_arm64.mk` copies a
+permissions file from it.
+
+**Choose the release config deliberately.** It is the middle field of the
+lunch target and it decides whether the image can run on real hardware:
+
+| Config | Use it when |
+|---|---|
+| `trunk_staging` | The vendor half comes from the same build - Cuttlefish, the emulator, a full device build. Nothing can mismatch. |
+| a released config: `bp4a`, `bp2a`, `ap4a`, ... | The image has to run against a vendor partition you did not build - any retail phone. |
+
+`trunk_staging` stamps the image as pre-release: `codename` is the
+codename rather than `REL`, `preview_sdk=1`, and `llndk.api_level` is a
+release ahead. A retail device rejects that and bootloops, while the same
+image boots happily on Cuttlefish - which is what makes it an expensive
+mistake to make. `ls build/release/flag_values/` lists what your tree has.
 
 ## Running what you built
 
@@ -211,11 +235,12 @@ Load-bearing. Removing any of these breaks the build:
 `prebuilts/jdk/jdk21` · `prebuilts/sdk` · most of `external/*` ·
 `tools/metalava` unless API checks are also disabled
 
-### Five that look cuttable and are not
+### Six that look cuttable and are not
 
-These sit in test and sample directories, so they read as obvious prunes.
-Each one stops the build dead. All four are commented out in the tiers
-rather than deleted, with the reason next to them:
+These sit in test, sample and old-toolchain directories, so they read as
+obvious prunes. Each one stops the build dead. All six are commented out
+in the tiers rather than deleted, with the reason beside them - the reason
+is worth more than the line:
 
 | Project | What depends on it |
 |---|---|
@@ -224,10 +249,15 @@ rather than deleted, with the reason next to them:
 | `platform/test/vts-testcase/hal` | `trusty/vendor/google/aosp` needs its `trusty_dirgroup_test_vts-testcase_hal_treble_vintf_aidl` dirgroup |
 | `device/sample` | `device/sample/etc/apns-full-conf.xml` is copied to `system/etc/apns-conf.xml` by the product config |
 | `platform/prebuilts/jdk/jdk8` | `external/guava` compiles against its `rt.jar` and `jce.jar` - easy to miss because the build itself runs on jdk21 |
+| `platform/prebuilts/gradle-plugin` | defines `metalava-gradle-plugin-deps`, which `tools/metalava` needs, and metalava is on the do-not-cut list above |
 
-The pattern is the same each time: a project whose *name* says "test"
-defines something the non-test tree consumes. Restoring all five costs
-about 2.7 GB, most of it `cts`.
+The pattern is the same each time: a directory whose *name* says test,
+sample or obsolete defines something the rest of the tree consumes.
+Restoring all six costs about 2.7 GB, almost all of it `cts`.
+
+They were also found in the worst possible order - one per build, each
+several hours apart, because the build reports them one at a time. The two
+scripts in the next section find this whole class in about four minutes.
 
 ### Check before you build
 
@@ -309,34 +339,34 @@ repo init --mirror -u https://android.googlesource.com/platform/manifest
 
 ## Status
 
-**Verified:** every project name resolves against the real
-`android-15.0.0_r20` manifest. 133 entries, 0 dead. Re-checkable in
-seconds with the command above.
+What has actually been done, and what has not.
 
-**Verified on a second branch:** `repo init` and `repo sync` complete
-against `android-16.0.0_r4`. This needed a fix - see *Branch
-portability* below.
+**Verified - manifests.** Every project name resolves against the real
+`android-15.0.0_r20` manifest: 133 entries, 0 dead. Re-checkable in
+seconds with `verify-manifest.sh`.
 
-**Now verified:** a tree has been synced with all five tiers applied on
-`android-16.0.0_r4` - 111 GB, 29 minutes on an 8-thread laptop - and
-Soong analysis completes against it in about 20 minutes. Getting there
-needed the four restorations under *Do not cut* and
+**Verified - sync.** A tree synced with all five tiers applied on
+`android-16.0.0_r4`: 111 GB, 29 minutes on an 8-thread laptop. This
+needed the `optional="true"` fix described under *Branch portability*.
+
+**Verified - analysis.** Soong analysis completes against that tree in
+about 20 minutes, and ninja plans roughly 165,000 actions. Getting there
+needed the six restorations under *Do not cut* plus
 `ALLOW_MISSING_DEPENDENCIES=true`.
 
-**Still not verified:** `products/lite_arm64.mk` has never been booted,
-and no build has been carried through to a flashed image from these
-targets specifically. The size figures for the individual tiers remain
-estimates.
+**Not verified - the built image.** No build here has been carried
+through to a flashed, booted device from these targets, and
+`products/lite_arm64.mk` has never been booted at all. The per-tier size
+figures remain estimates.
 
-**Verified separately:** the QEMU path in
+**Verified separately.** The QEMU path in
 [docs/EMULATOR.md](docs/EMULATOR.md), on a different tree - an arm64 GSI
 booting to `sys.boot_completed=1` against a Cuttlefish vendor of the same
 release, under TCG on an x86-64 host. That says the emulator procedure
-works. It says nothing about the targets in this repository, which remain
-unbuilt.
+works. It says nothing about the targets here.
 
-So the names are known good and the outcome is not. Corrections welcome.
-Promises are not made.
+So the names are known good, the tree builds, and the outcome is
+unproven. Corrections welcome. Promises are not made.
 
 ### Two things worth knowing before you look for them
 
@@ -348,10 +378,6 @@ downloaded.
 `platform/development` is deliberately not pruned. It holds host tooling
 that parts of the build reference, and removing it produces a confusing
 failure rather than a saving.
-
-## Licence
-
-Apache 2.0, matching AOSP.
 
 ## Branch portability
 
@@ -376,3 +402,7 @@ The tiers now apply to any branch. Entries that do not exist on your
 branch are ignored; the rest still prune. `tools/verify-manifest.sh
 --tag <branch>` tells you how many resolved, so a silently-skipped entry
 is still countable rather than invisible.
+
+## Licence
+
+Apache 2.0, matching AOSP.

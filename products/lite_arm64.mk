@@ -1,7 +1,12 @@
 # AOSPLite - arm64 GSI target, trimmed.
 #
-#   lunch lite_arm64-trunk_staging-userdebug
+#   lunch lite_arm64-bp4a-userdebug       # for real hardware
+#   lunch lite_arm64-trunk_staging-userdebug  # for Cuttlefish only
 #   m systemimage
+#
+# The release config is not cosmetic - trunk_staging builds a
+# pre-release image that a retail device refuses to boot. See
+# AndroidProducts.mk.
 #
 # ---------------------------------------------------------------------
 # What this is

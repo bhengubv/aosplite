@@ -1,7 +1,12 @@
 # AOSPLite - desktop, x86_64.
 #
-#   lunch desktop_x86_64-trunk_staging-userdebug
+#   lunch desktop_x86_64-bp4a-userdebug       # for real hardware
+#   lunch desktop_x86_64-trunk_staging-userdebug  # for Cuttlefish only
 #   m systemimage
+#
+# The release config is not cosmetic - trunk_staging builds a
+# pre-release image that a retail device refuses to boot. See
+# AndroidProducts.mk.
 #
 # ---------------------------------------------------------------------
 # Why this file exists
