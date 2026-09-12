@@ -26,20 +26,49 @@ tree you intend to develop AOSP itself in, it is not.
 ## Tier 1 - test suites
 
 CTS, VTS, MLTS, csuite, catbox. These exist to certify a build against
-Google's compatibility program. They are not inputs to a build and not
-present on a device.
+Google's compatibility program, and the suites themselves are neither
+inputs to a build nor present on a device.
 
-If you intend to pursue GMS certification, you need them back. Nothing
-else depends on them.
+**"Nothing else depends on them" was wrong**, and it was the most
+expensive sentence in this document. Three of these projects define
+things the non-test tree consumes, and removing them stops the build:
+
+| Project | What it defines | Who needs it |
+|---|---|---|
+| `platform/cts` | `cts_defaults`, `mts-target-sdk-version-current` | the `tests/cts` directories that ship *inside* `packages/modules/*` - DeviceLock, Connectivity, Profiling, Uwb |
+| `test/app_compat/csuite` | the `csuite_test` Soong module type | `frameworks/base/libs/WindowManager/Shell/tests/flicker/pip`, `art/test` |
+| `test/vts-testcase/hal` | the `trusty_dirgroup_test_vts-testcase_hal_treble_vintf_aidl` dirgroup | `trusty/vendor/google/aosp` |
+
+All three are commented out in the tier rather than removed. The
+mechanism is worth understanding because it recurs: a project whose
+*name* says test defines a Soong primitive - a defaults block, a module
+type, a dirgroup - and Soong parses every `Android.bp` in the tree
+regardless of what you are building.
+
+If you intend to pursue GMS certification, you need the suites
+themselves back too.
 
 ## Tier 2 - host toolchains for other operating systems
 
-AOSP carries prebuilt Clang, Go and GCC headers for macOS hosts, plus
-several superseded JDKs, so that the same tree builds on any developer's
-machine. On a Linux builder they are inert.
+AOSP carries prebuilt Clang, Go and GCC headers for macOS hosts so that
+the same tree builds on any developer's machine. On a Linux builder those
+are inert.
 
 `prebuilts/clang/host/linux-x86` is the actual compiler and is not in
-this tier. `prebuilts/jdk/jdk21` is the JDK the build uses.
+this tier. `prebuilts/jdk/jdk21` is the JDK the build runs on.
+
+**The superseded JDKs are not inert.** `prebuilts/jdk/jdk8` was in this
+tier on the reasoning that the build uses jdk21. It does - but
+`external/guava` *compiles against* jdk8:
+
+```
+module guava-both missing dependencies:
+prebuilts/jdk/jdk8/linux-x86/jre/lib/jce.jar,
+prebuilts/jdk/jdk8/linux-x86/jre/lib/rt.jar
+```
+
+Which JDK runs the build and which JDKs modules compile against are
+different questions. jdk8 is commented out in the tier now.
 
 ## Tier 3 - other vendors' hardware
 
@@ -55,8 +84,28 @@ Known pairings:
 | Pixel 7 / 7 Pro | `device/google/pantah`, `gs201` |
 | Qualcomm-based | `hardware/qcom/*` |
 
-A GSI target needs none of them - it relies on the vendor partition
-already on the device.
+A GSI target needs none of these *device trees* - it relies on the vendor
+partition already on the device.
+
+It does need `device/sample`, which is in this tier and is not a device
+tree at all. `device/sample/etc/apns-full-conf.xml` is copied to
+`system/etc/apns-conf.xml` by the product configuration, so removing it
+stops the build at packaging:
+
+```
+ninja: 'device/sample/etc/apns-full-conf.xml', needed by
+'out/target/product/generic_arm64/system/etc/apns-conf.xml',
+missing and no known rule to make it
+```
+
+Commented out in the tier now.
+
+**Most of this tier is dead on newer branches.** Checked against
+`android-16.0.0_r4`, 46 of its 72 entries name projects that no longer
+exist under those names, so they prune nothing. The saving quoted for
+this tier was measured on `android-15.0.0_r20`. Run
+`tools/verify-manifest.sh` against your own branch before believing any
+figure here.
 
 ## Tier 4 - stock applications
 
@@ -77,6 +126,18 @@ from this tree.
 If you build applications out of the platform tree rather than only the
 platform, some of this comes back.
 
+Three entries had to come back regardless, and none of them is obviously
+"tooling":
+
+| Project | What it supplies | Who needs it |
+|---|---|---|
+| `prebuilts/gradle-plugin` | `metalava-gradle-plugin-deps` | `tools/metalava`, which is already on the do-not-cut list |
+| `prebuilts/cmdline-tools` | `lint_api` | `tools/lint_checks`, and the `lint/` directories under `packages/modules/*` |
+| `prebuilts/maven_repo/bumptech` | `glide-prebuilt` and friends | `packages/apps/DocumentsUI`, `packages/apps/WallpaperPicker2` - both ship in a system image |
+
+The last one was caught by `tools/check-modules.sh` before it broke a
+build. The other two were not.
+
 ## What is not cut, and will not be
 
 Load-bearing in the sense that the build stops without them:
@@ -89,6 +150,30 @@ required - it is where the third-party libraries live.
 
 `tools/metalava` is the API surface checker. It can be dropped if API
 checks are disabled too, but not on its own.
+
+## How a wrong cut presents
+
+Every mistake above shares one shape: something in the surviving tree
+names something in the pruned project. What differs is *when* you are
+told, and the expensive cases are the late ones.
+
+| Named thing | When it fails | Example |
+|---|---|---|
+| A Soong **module type** | analysis, ~20 min in | `unrecognized module type "csuite_test"` |
+| A Soong **defaults** block | analysis | `depends on undefined module "cts_defaults"` |
+| A **module** | when that module is built - possibly hours in | `module metalava missing dependencies: metalava-gradle-plugin-deps` |
+| A **file path** | at packaging, after everything compiles | `missing and no known rule to make it` |
+
+The last two are late because a pruned tree has to set
+`ALLOW_MISSING_DEPENDENCIES=true` - without it Soong panics on the first
+missing fuzzer rather than reporting anything. With it, each missing
+dependency becomes a runtime `echo ... && false`. So the build tells you
+about exactly one per run, and you find them one at a time, hours apart.
+That is how seven of the eight above were found.
+
+Do not work that way. `tools/preflight.sh` and `tools/check-modules.sh`
+read the build files directly and list the whole class in about four
+minutes each.
 
 ## The floor
 
