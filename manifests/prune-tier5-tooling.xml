@@ -33,7 +33,14 @@
 
   <!-- App-build tooling -->
   <remove-project name="platform/prebuilts/ndk" optional="true"/>
+  <!-- NOT pruned: defines metalava-gradle-plugin-deps, which tools/metalava
+       lists in its dependencies. metalava is already on the do-not-cut
+       list, so cutting what it needs fails the same way:
+         module metalava missing dependencies: metalava-gradle-plugin-deps
+       Surfaces at build time rather than analysis, because a pruned tree
+       sets ALLOW_MISSING_DEPENDENCIES.
   <remove-project name="platform/prebuilts/gradle-plugin" optional="true"/>
+  -->
   <remove-project name="platform/prebuilts/maven_repo/bumptech" optional="true"/>
   <remove-project name="platform/prebuilts/cmdline-tools" optional="true"/>
   <remove-project name="platform/prebuilts/devtools" optional="true"/>
