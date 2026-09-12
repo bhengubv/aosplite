@@ -50,6 +50,32 @@ grep -o 'name="[^"]*"' "$SRC" | sed 's/name="//;s/"//' | sort -u > "$known"
 echo "$(wc -l < "$known") projects in reference manifest"
 echo
 
+# Entries inside XML comments are deliberately disabled - a project that
+# must not be pruned, with the reason kept beside it. A plain grep counts
+# those as live, reports them as dead when they are simply not being used,
+# and inflates every total. Parse the XML instead.
+entries() {
+    python3 - "$1" <<'ENTRIES_PY'
+import sys, xml.etree.ElementTree as ET
+for e in ET.parse(sys.argv[1]).getroot().findall("remove-project"):
+    if e.get("name"):
+        print(e.get("name"))
+ENTRIES_PY
+}
+
+# repo will not read a manifest that is not well-formed XML, and the
+# easiest way to break one is a rule of hyphens inside a comment - XML
+# forbids "--" there. Fail loudly rather than reporting zero entries.
+for f in "$MANIFEST_DIR"/*.xml; do
+    [ -e "$f" ] || continue
+    if ! python3 -c "import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])" "$f" 2>/dev/null; then
+        echo "MALFORMED XML: $f" >&2
+        python3 -c "import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])" "$f" 2>&1 | tail -1 >&2
+        echo "repo cannot read this file at all." >&2
+        exit 2
+    fi
+done
+
 rc=0
 total=0
 dead=0
@@ -62,7 +88,7 @@ for f in "$MANIFEST_DIR"/prune-*.xml "$MANIFEST_DIR"/optional-*.xml; do
             printf '  MISSING  %s\n' "$name"
             m=$((m+1))
         fi
-    done < <(grep -o 'remove-project name="[^"]*"' "$f" | sed 's/.*name="//;s/"//')
+    done < <(entries "$f")
     printf '%-32s %3d entries, %d dead\n' "$(basename "$f")" "$n" "$m"
     total=$((total+n)); dead=$((dead+m))
 done

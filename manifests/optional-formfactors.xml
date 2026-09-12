@@ -7,7 +7,7 @@
   phone-only tree.
 
   What these actually are
-  -----------------------
+  =======================
   These are not hardware support. They are the product definitions for
   entire form factors, and each carries lunch targets:
 
@@ -25,7 +25,7 @@
     device/google_car       Google car reference device
 
   Why you might want to keep them
-  -------------------------------
+  ===============================
   The atv_* stack is the only worked example in AOSP of a form factor
   layered cleanly on base_system - atv_system.mk sits beside
   handheld_system.mk and does the same job for a different device class.
@@ -34,7 +34,7 @@
   the template you would copy.
 
   What is NOT here
-  ----------------
+  ================
   The applications and services for these form factors live elsewhere
   and are never pruned by this repository:
 

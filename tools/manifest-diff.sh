@@ -13,6 +13,10 @@ if [ $# -ne 2 ]; then
     exit 1
 fi
 
+# Reference manifests have no commented-out entries, so a grep is fine
+# here. Do not copy this into anything that reads the prune tiers - those
+# deliberately keep disabled entries inside XML comments, and a grep
+# counts them as live. See entries() in verify-manifest.sh.
 names() { grep -o 'name="[^"]*"' "$1" | sed 's/name="//;s/"//' | sort -u; }
 
 old=$(mktemp); new=$(mktemp)
