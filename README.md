@@ -229,6 +229,43 @@ The pattern is the same each time: a project whose *name* says "test"
 defines something the non-test tree consumes. Restoring all five costs
 about 2.7 GB, most of it `cts`.
 
+### Check before you build
+
+Six projects have had to be restored, and every one was found the same
+expensive way: the build failed, hours in, on exactly one of them. Two
+tools in `tools/` find them up front instead.
+
+```bash
+tools/preflight.sh ~/android      # ~2 min - paths into pruned projects
+tools/check-modules.sh ~/android  # ~2 min - module names nothing defines
+```
+
+They catch different halves of the same problem:
+
+| Failure shape | Example | Found by |
+|---|---|---|
+| build file names a **path** inside a pruned project | `device/sample/etc/apns-full-conf.xml`, `prebuilts/jdk/jdk8/.../rt.jar` | `preflight.sh` |
+| build file names a **module** nothing defines | `metalava-gradle-plugin-deps`, `cts_defaults` | `check-modules.sh` |
+| build file uses a **module type** nothing defines | `csuite_test` | Soong analysis |
+
+For the third, run the analysis gate - it stops before compiling:
+
+```bash
+tools/build.sh <lunch-target> nothing
+```
+
+Both scripts are heuristics over the `.bp` and `.mk` files, not compilers.
+They over-report: generated stub modules, Soong-namespace prebuilts and
+names assembled at build time all look undefined. `check-modules.sh`
+filters the obvious classes and says how many it filtered. Read the output
+as a list to check, not a list of certain failures.
+
+**Why the build itself cannot give you this list.** With
+`ALLOW_MISSING_DEPENDENCIES=true` - which a pruned tree needs - Soong turns
+each missing dependency into a runtime `echo ... && false`, so you get one
+per build. Without it, Soong panics on the first missing fuzzer and reports
+nothing at all. Neither mode enumerates.
+
 ### A pruned tree needs ALLOW_MISSING_DEPENDENCIES
 
 Even with those four restored, Soong panics rather than skipping modules

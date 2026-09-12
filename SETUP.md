@@ -326,7 +326,37 @@ not, the cache is not being consulted at all - check `CCACHE_EXEC`.
 
 ---
 
+## 6b. Preflight, if you pruned the tree
+
+Skip this if you synced the full manifest. If you applied the tiers in
+this repository, run both checks before starting a build - each takes
+about two minutes, and each one you skip is potentially hours lost:
+
+```bash
+tools/preflight.sh ~/android
+```
+
+```bash
+tools/check-modules.sh ~/android
+```
+
+```bash
+tools/build.sh <lunch-target> nothing
+```
+
+The first finds build files that name paths inside pruned projects. The
+second finds module names nothing in the tree defines. The third runs
+Soong's own analysis and stops before compiling, which is the only thing
+that catches a missing *module type* such as `csuite_test`.
+
+Anything they flag, you fix by un-pruning: comment the `remove-project`
+entry out in the relevant manifest, keep the line, write down why, then
+`repo sync -c -j$(nproc) --no-clone-bundle <project>`.
+
+---
+
 ## 7. Build
+
 
 ```bash
 source build/envsetup.sh
@@ -402,6 +432,15 @@ own set of traps - see [docs/EMULATOR.md](docs/EMULATOR.md).
 | `plain text not allowed here` from aapt2 | Malformed XML in a `res/values/` file - often a stray character outside an element. |
 | A `<remove-project>` that saved nothing | The project name is wrong for this release. Run `verify-manifest.sh`. |
 | Build is absurdly slow on Windows | The tree is under `/mnt/c`. Move it into the WSL filesystem. |
+| `unrecognized module type \"X\"` | The project defining that Soong module type was pruned. `csuite_test` comes from `test/app_compat/csuite`. |
+| `depends on undefined module \"X\"` | The project defining module X was pruned. `cts_defaults` comes from `platform/cts`. Run `tools/check-modules.sh`. |
+| `module X missing dependencies: <path>` | A pruned project, surfacing at build time rather than analysis because `ALLOW_MISSING_DEPENDENCIES` is set. Run `tools/preflight.sh`. |
+| `missing and no known rule to make it` | A `PRODUCT_COPY_FILES` source inside a pruned project. `device/sample/etc/apns-full-conf.xml` is the usual one. |
+| `panic ... Fuzzer doesn't exist` | A pruned tree without `ALLOW_MISSING_DEPENDENCIES=true`. Set it - `tools/build.sh` does. |
+| `remove-project element specifies non-existent project` | A prune entry naming a project absent from your branch. Add `optional=\"true\"` to it. |
+| `Got signal: terminated` with no error | The machine slept. Nothing is wrong with the build; disable sleep and start again. |
+| Everything rebuilds after a one-line change | `USE_CCACHE` changed between runs. It rewrites every compile command. Put it back and leave it. |
+| Image boots on Cuttlefish, bootloops on a phone | Built with `trunk_staging`. Check `ro.build.version.codename` in the image - it must be `REL`. Rebuild with a released config. |
 
 ---
 
