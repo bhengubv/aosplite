@@ -125,11 +125,16 @@ prune surfaces in minutes rather than hours.
 
 | Tier | Cut | Entries | Saves | Risk |
 |---|---|---|---|---|
-| 1 | Test suites and harnesses - CTS, VTS, MTS, TradeFed | 27 | ~12 GB | very low |
-| 2 | Darwin toolchains, JDK 8, mingw cross-compiler | 5 | ~12 GB | low |
-| 3 | Device trees, vendor HALs, device kernels | 73 | ~14 GB | low |
+| 1 | Test suites and harnesses - VTS, MTS, TradeFed | 24 | ~12 GB | very low |
+| 2 | Darwin toolchains, mingw cross-compiler | 4 | ~12 GB | low |
+| 3 | Device trees, vendor HALs, device kernels | 72 | ~14 GB | low |
 | 4 | Stock applications | 11 | ~3 GB | medium |
-| 5 | Samples, SDK packaging, emulator, app tooling | 14 | ~8 GB | medium |
+| 5 | Samples, SDK packaging, emulator, app tooling | 11 | ~8 GB | medium |
+
+Counts are the entries still active. Eight more are present but commented
+out - see *Eight that look cuttable and are not*. CTS and JDK 8 are named
+in tiers 1 and 2 but no longer removed, which is why those rows read lower
+than they once did.
 
 Tier 3 is target-specific. Every line removes support for a board or a
 vendor's HAL, so edit it for hardware you actually flash. Cuttlefish is
