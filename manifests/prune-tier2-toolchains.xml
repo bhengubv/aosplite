@@ -24,7 +24,14 @@
   <remove-project name="platform/prebuilts/clang/host/darwin-x86" optional="true"/>
   <remove-project name="platform/prebuilts/go/darwin-x86" optional="true"/>
   <remove-project name="platform/prebuilts/bazel/darwin-x86_64" optional="true"/>
+  <!-- NOT pruned: external/guava compiles against jdk8's rt.jar and
+       jce.jar. Removing it fails the build with
+         module guava-both missing dependencies:
+         prebuilts/jdk/jdk8/linux-x86/jre/lib/jce.jar, .../rt.jar
+       This one gets missed because the build itself runs on jdk21, so
+       jdk8 reads as dead weight.
   <remove-project name="platform/prebuilts/jdk/jdk8" optional="true"/>
+  -->
 
   <!-- Windows cross-compiler. Only needed to build Windows host tools
        (the Windows SDK). Not needed for a device image. -->

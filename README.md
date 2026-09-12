@@ -211,7 +211,7 @@ Load-bearing. Removing any of these breaks the build:
 `prebuilts/jdk/jdk21` · `prebuilts/sdk` · most of `external/*` ·
 `tools/metalava` unless API checks are also disabled
 
-### Four that look cuttable and are not
+### Five that look cuttable and are not
 
 These sit in test and sample directories, so they read as obvious prunes.
 Each one stops the build dead. All four are commented out in the tiers
@@ -223,10 +223,11 @@ rather than deleted, with the reason next to them:
 | `platform/test/app_compat/csuite` | defines the `csuite_test` Soong module type, used by `frameworks/base/libs/WindowManager/Shell/tests/flicker/pip` and `art/test` |
 | `platform/test/vts-testcase/hal` | `trusty/vendor/google/aosp` needs its `trusty_dirgroup_test_vts-testcase_hal_treble_vintf_aidl` dirgroup |
 | `device/sample` | `device/sample/etc/apns-full-conf.xml` is copied to `system/etc/apns-conf.xml` by the product config |
+| `platform/prebuilts/jdk/jdk8` | `external/guava` compiles against its `rt.jar` and `jce.jar` - easy to miss because the build itself runs on jdk21 |
 
 The pattern is the same each time: a project whose *name* says "test"
-defines something the non-test tree consumes. Restoring all four costs
-about 2.4 GB, almost all of it `cts`.
+defines something the non-test tree consumes. Restoring all five costs
+about 2.7 GB, most of it `cts`.
 
 ### A pruned tree needs ALLOW_MISSING_DEPENDENCIES
 
