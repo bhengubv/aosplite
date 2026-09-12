@@ -1,0 +1,21 @@
+# Names the checks report that are not actually missing.
+#
+# One entry per line. A leading '#' is a comment. Blank lines ignored.
+# Both tools/check-modules.sh and tools/preflight.sh read this file.
+#
+# Put something here only after you have looked and are sure. Every entry
+# is a check you have switched off, so say why next to it - the reason is
+# what stops the next person un-switching it or trusting it blindly.
+#
+# The generated-name classes - aidl_interface backends, java_sdk_library
+# stubs and .impl, sysprop_library - are filtered in the scripts
+# themselves, not here. This file is for one-off names.
+
+# Soong variant syntax, not a module name. "libdexfile#impl" selects the
+# implementation variant of libdexfile, which is defined in art/.
+libdexfile#impl
+libdexfiled#impl
+libartbase#impl
+libartbased#impl
+libdexfile#static
+libartpalette#impl

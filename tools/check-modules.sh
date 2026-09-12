@@ -27,12 +27,26 @@
 set -eo pipefail
 
 TREE="${1:-$HOME/android}"
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ -d "$TREE" ] || { echo "no tree at $TREE" >&2; exit 1; }
 
-python3 - "$TREE" <<'PY'
+python3 - "$TREE" "$SELF" <<'PY'
 import os, re, sys, collections
 
 tree = sys.argv[1]
+self_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__ if "__file__" in dir() else ".")))
+
+# Names a human has looked at and ruled out. See the file's own header.
+allow = set()
+_fp = os.path.join(self_dir, "tools", "known-false-positives.txt")
+try:
+    for line in open(_fp, encoding="utf-8"):
+        line = line.split("#", 1)[0].strip()
+        if line:
+            allow.add(line)
+except OSError:
+    pass
 
 # A module definition is  name: "something",  inside any module block.
 DEF = re.compile(r'^\s*name\s*:\s*"([^"]+)"', re.M)
@@ -115,7 +129,7 @@ IGNORE = re.compile(
 
 missing = {
     n: f for n, f in referenced.items()
-    if n not in defined and not IGNORE.search(n)
+    if n not in defined and not IGNORE.search(n) and n not in allow
 }
 ignored = sum(
     1 for n in referenced

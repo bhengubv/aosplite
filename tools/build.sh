@@ -55,6 +55,99 @@ esac
 
 [ -d "$TREE" ] || { echo "no tree at $TREE (set AOSP_TREE)" >&2; exit 1; }
 
+# --- pruning checks -----------------------------------------------------
+#
+# These are not optional and there is no flag to turn them off. A pruned
+# tree reports this class of breakage one item per build, hours apart - see
+# "How a wrong cut presents" in docs/RATIONALE.md - so finding it up front
+# is the difference between minutes and days.
+#
+# Leaving them as scripts somebody might remember to run did not work:
+# lint_api was sitting in check-modules.sh output before the build that
+# failed on it, and nobody looked.
+#
+# Everything below is written so that a check which cannot run is a
+# failure, never a pass. The first version of this gate resolved the script
+# paths through an undefined variable, found nothing, and printed "checks
+# passed" in two seconds. That is worse than having no gate at all.
+
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+pruned_tree() {
+    [ -d "$TREE/.repo/local_manifests" ] &&
+        ls "$TREE"/.repo/local_manifests/*.xml >/dev/null 2>&1
+}
+
+if pruned_tree; then
+    echo "pruned tree - running checks"
+    echo
+
+    CHECKS="check-env preflight check-modules"
+
+    for check in $CHECKS; do
+        script="$SELF/tools/$check.sh"
+        if [ ! -f "$script" ]; then
+            echo "ERROR: $script not found." >&2
+            echo "The checks are part of the build. Refusing to build without" >&2
+            echo "them rather than pretending they passed." >&2
+            exit 2
+        fi
+    done
+
+    failed=""
+    for check in $CHECKS; do
+        script="$SELF/tools/$check.sh"
+        echo "  $check.sh ..."
+        set +e
+        # check-env wants the target as well - it is the only one that can
+        # tell you the lunch config is staging or the make target builds
+        # nothing.
+        if [ "$check" = "check-env" ]; then
+            out=$(bash "$script" "$TREE" "$LUNCH" "$TARGET" 2>&1)
+        else
+            out=$(bash "$script" "$TREE" 2>&1)
+        fi
+        rc=$?
+        set -e
+        case "$rc" in
+            0) echo "    clean" ;;
+            1) failed="$failed $check"
+               echo
+               echo "$out" | sed -n '1,40p'
+               echo ;;
+            *) echo "ERROR: $check.sh exited $rc - it did not complete." >&2
+               echo "$out" | tail -5 >&2
+               exit 2 ;;
+        esac
+    done
+
+    if [ -n "$failed" ]; then
+        cat >&2 <<'BLOCKED'
+
+Not building. The checks found references to projects that are not in this
+tree. Each one fails the build - some during analysis, some only when the
+module is reached, hours in.
+
+Fix by un-pruning: comment the remove-project entry out in the relevant
+manifest, keep the line, write down why, then
+
+    repo sync -c -j$(nproc) --no-clone-bundle <project>
+
+Both scripts over-report - generated module names and Soong-namespace
+prebuilts look undefined. Read the list; un-prune what is real. If you have
+checked and every remaining entry is a false positive, record that by
+adding the name to tools/known-false-positives.txt, which both scripts
+read. There is deliberately no flag to skip the checks: a skip flag is how
+you end up finding these one per build again.
+BLOCKED
+        exit 1
+    fi
+
+    echo
+    echo "checks clean"
+    echo
+fi
+
 mkdir -p "$GOCACHE" "$XDG_CACHE_HOME"
 cd "$TREE"
 
