@@ -75,11 +75,38 @@ explicitly in `C:\Users\<you>\.wslconfig`:
 
 ```ini
 [wsl2]
-memory=48GB
-swap=16GB
+memory=24GB
+processors=8
+swap=64GB
 ```
 
 Then `wsl --shutdown` from PowerShell and reopen.
+
+Size those two numbers deliberately:
+
+- `memory` should leave Windows several gigabytes. On a 32 GB host, 24 GB
+  is about the ceiling. Taking more makes the whole machine swap.
+- `swap` is not the afterthought it looks like. `soong_build` reads every
+  build file in the tree in one process and was measured at **22 GB
+  resident** on a pruned Android 16 tree. With 16 GB of swap it reached
+  11 GB used during analysis alone, before a single file was compiled.
+  64 GB costs nothing but disk.
+
+Measured on an 8-thread laptop: analysis completes in about 20 minutes.
+The same analysis on a 4-core server took 2 hours 20 minutes, so this is
+worth getting right.
+
+**Do not let the machine sleep.** Suspending sends `SIGTERM` to
+`soong_ui`:
+
+```
+00:58:31 Got signal: terminated
+00:58:35 soong bootstrap failed with: signal: killed
+```
+
+The build is dead and nothing says so until you look. On a laptop, plug it
+in and set sleep to never for the duration - closing the lid is enough to
+lose several hours of work.
 
 **Disk.** The WSL virtual disk grows but does not shrink. Deleting files
 inside WSL frees space for the build; it does not give the space back to
@@ -263,6 +290,20 @@ Size it properly. At the 5 GB default the cache evicts itself partway
 through a build and you get the cost with none of the benefit. 50 GB is
 a reasonable floor for AOSP.
 
+**Decide once, then never change it.** `USE_CCACHE` controls
+`CC_WRAPPER`, which is prepended to every C++ compile command. Turning it
+on - or off - rewrites all of them, and ninja correctly concludes that
+every object in `out/` is stale:
+
+```
+ninja explain: command line changed for .../bionic/libc/.../android_mallopt.o
+```
+
+On a full tree that is roughly 100,000 actions. A 90-minute incremental
+becomes a full rebuild measured in days, and Soong re-reads the whole tree
+first because its analysis is cached against the environment too. Whatever
+your existing `out/` was built with, leave the setting alone.
+
 **What ccache does not do:** it caches compiles, not links, and it is
 invalidated wholesale when the compiler changes. A `repo sync` that
 pulls a new Clang prebuilt resets your hit rate to zero, legitimately.
@@ -292,7 +333,7 @@ source build/envsetup.sh
 ```
 
 ```bash
-lunch aosp_arm64-trunk_staging-userdebug
+lunch aosp_arm64-bp4a-userdebug
 ```
 
 ```bash
@@ -302,7 +343,15 @@ m
 - `source build/envsetup.sh` defines `m`, `lunch` and friends. It only
   affects the current shell - open a new terminal and you do it again.
 - `lunch` picks the product and variant, in the form
-  `<product>-<release>-<variant>`.
+  `<product>-<release>-<variant>`. **The release field matters.**
+  `trunk_staging` is the in-development configuration: it stamps the image
+  as pre-release, and a pre-release system will not boot against a retail
+  device's vendor partition. The symptoms in the built image are
+  `ro.build.version.codename=<codename>` rather than `REL`,
+  `ro.build.version.preview_sdk=1`, and an `ro.llndk.api_level` one
+  release ahead of the device. Use a released config - `bp4a`, `bp2a`,
+  `ap4a` and so on; `ls build/release/flag_values/` lists what your tree
+  has. Google's own GSIs are built this way.
 - `m` builds. `m -j8` sets parallelism; bare `m` picks a number itself.
 
 For the targets in this repository:

@@ -101,7 +101,11 @@
   <remove-project name="device/linaro/hikey-kernel" optional="true"/>
   <remove-project name="device/linaro/poplar" optional="true"/>
   <remove-project name="device/linaro/poplar-kernel" optional="true"/>
+  <!-- NOT pruned: device/sample/etc/apns-full-conf.xml is copied to
+       system/etc/apns-conf.xml by the product configuration, so ninja stops
+       with "missing and no known rule to make it" during packaging.
   <remove-project name="device/sample" optional="true"/>
+  -->
 
   <!-- Vendor HALs -->
   <remove-project name="platform/hardware/broadcom/libbt" optional="true"/>

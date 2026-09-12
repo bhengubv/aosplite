@@ -211,6 +211,48 @@ Load-bearing. Removing any of these breaks the build:
 `prebuilts/jdk/jdk21` · `prebuilts/sdk` · most of `external/*` ·
 `tools/metalava` unless API checks are also disabled
 
+### Four that look cuttable and are not
+
+These sit in test and sample directories, so they read as obvious prunes.
+Each one stops the build dead. All four are commented out in the tiers
+rather than deleted, with the reason next to them:
+
+| Project | What depends on it |
+|---|---|
+| `platform/cts` | defines `cts_defaults` and `mts-target-sdk-version-current`, used by the CTS directories that ship *inside* `packages/modules/*` - DeviceLock, Connectivity, Profiling, Uwb |
+| `platform/test/app_compat/csuite` | defines the `csuite_test` Soong module type, used by `frameworks/base/libs/WindowManager/Shell/tests/flicker/pip` and `art/test` |
+| `platform/test/vts-testcase/hal` | `trusty/vendor/google/aosp` needs its `trusty_dirgroup_test_vts-testcase_hal_treble_vintf_aidl` dirgroup |
+| `device/sample` | `device/sample/etc/apns-full-conf.xml` is copied to `system/etc/apns-conf.xml` by the product config |
+
+The pattern is the same each time: a project whose *name* says "test"
+defines something the non-test tree consumes. Restoring all four costs
+about 2.4 GB, almost all of it `cts`.
+
+### A pruned tree needs ALLOW_MISSING_DEPENDENCIES
+
+Even with those four restored, Soong panics rather than skipping modules
+whose dependencies were pruned - `system/sepolicy/build/soong/validate_bindings.go`
+does this explicitly:
+
+```go
+if !ctx.OtherModuleExists(fuzzer) && !ctx.Config().AllowMissingDependencies() {
+    panic(fmt.Errorf("Fuzzer doesn't exist : %s", fuzzer))
+}
+```
+
+So export it before building:
+
+```bash
+export ALLOW_MISSING_DEPENDENCIES=true
+```
+
+`tools/build.sh` sets it, along with the other environment this tree
+needs. Use that rather than setting things by hand:
+
+```bash
+tools/build.sh circle_arm64-bp4a-userdebug systemimage
+```
+
 ## Two things this does not do
 
 **It does not shrink the compile.** Pruning cuts disk and analysis time.
@@ -237,9 +279,16 @@ seconds with the command above.
 against `android-16.0.0_r4`. This needed a fix - see *Branch
 portability* below.
 
-**Not verified:** no tree has been synced with these tiers applied, no
-build has been run, and `products/lite_arm64.mk` has never been booted.
-The size figures are estimates, not measurements.
+**Now verified:** a tree has been synced with all five tiers applied on
+`android-16.0.0_r4` - 111 GB, 29 minutes on an 8-thread laptop - and
+Soong analysis completes against it in about 20 minutes. Getting there
+needed the four restorations under *Do not cut* and
+`ALLOW_MISSING_DEPENDENCIES=true`.
+
+**Still not verified:** `products/lite_arm64.mk` has never been booted,
+and no build has been carried through to a flashed image from these
+targets specifically. The size figures for the individual tiers remain
+estimates.
 
 **Verified separately:** the QEMU path in
 [docs/EMULATOR.md](docs/EMULATOR.md), on a different tree - an arm64 GSI

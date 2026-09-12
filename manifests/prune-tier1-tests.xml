@@ -16,18 +16,39 @@
 -->
 <manifest>
   <!-- Compatibility and vendor test suites -->
+  <!-- NOT pruned: platform/cts defines cts_defaults and
+       mts-target-sdk-version-current. The mainline modules ship their own
+       CTS test directories - packages/modules/DeviceLock/tests/cts,
+       Connectivity, Profiling, Uwb and others - and those Android.bp files
+       reference both. Removing cts makes Soong fail with "depends on
+       undefined module cts_defaults" before generating any ninja file.
+       2.3 GB kept to avoid that.
   <remove-project name="platform/cts" optional="true"/>
+  -->
   <remove-project name="platform/test/cts-root" optional="true"/>
   <remove-project name="platform/test/mts" optional="true"/>
   <remove-project name="platform/test/vts" optional="true"/>
+  <!-- NOT pruned: trusty/vendor/google/aosp/scripts/Android.bp declares
+       trusty_aosp_dirgroups, which depends on the dirgroup
+       trusty_dirgroup_test_vts-testcase_hal_treble_vintf_aidl defined in
+       test/vts-testcase/hal/treble/vintf. Removing it fails Soong with a
+       missing-dependency error.
   <remove-project name="platform/test/vts-testcase/hal" optional="true"/>
+  -->
   <remove-project name="platform/test/vts-testcase/hal-trace" optional="true"/>
   <remove-project name="platform/test/vts-testcase/kernel" optional="true"/>
   <remove-project name="platform/test/vts-testcase/nbu" optional="true"/>
   <remove-project name="platform/test/vts-testcase/performance" optional="true"/>
   <remove-project name="platform/test/vts-testcase/security" optional="true"/>
   <remove-project name="platform/test/vts-testcase/vndk" optional="true"/>
+  <!-- NOT pruned: test/app_compat/csuite defines the csuite_test Soong
+       module type, and Android.bp files outside the test tree use it -
+       frameworks/base/libs/WindowManager/Shell/tests/flicker/pip and
+       art/test both do on android-16.0.0_r4. Removing the project makes
+       Soong fail with "unrecognized module type csuite_test" before it
+       generates any ninja file. 5 MB kept to avoid that.
   <remove-project name="platform/test/app_compat/csuite" optional="true"/>
+  -->
   <remove-project name="platform/test/catbox" optional="true"/>
   <remove-project name="platform/test/dittosuite" optional="true"/>
   <remove-project name="platform/test/mlts/benchmark" optional="true"/>
