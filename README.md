@@ -235,10 +235,10 @@ Load-bearing. Removing any of these breaks the build:
 `prebuilts/jdk/jdk21` · `prebuilts/sdk` · most of `external/*` ·
 `tools/metalava` unless API checks are also disabled
 
-### Six that look cuttable and are not
+### Eight that look cuttable and are not
 
 These sit in test, sample and old-toolchain directories, so they read as
-obvious prunes. Each one stops the build dead. All six are commented out
+obvious prunes. Each one stops the build dead. All eight are commented out
 in the tiers rather than deleted, with the reason beside them - the reason
 is worth more than the line:
 
@@ -250,14 +250,17 @@ is worth more than the line:
 | `device/sample` | `device/sample/etc/apns-full-conf.xml` is copied to `system/etc/apns-conf.xml` by the product config |
 | `platform/prebuilts/jdk/jdk8` | `external/guava` compiles against its `rt.jar` and `jce.jar` - easy to miss because the build itself runs on jdk21 |
 | `platform/prebuilts/gradle-plugin` | defines `metalava-gradle-plugin-deps`, which `tools/metalava` needs, and metalava is on the do-not-cut list above |
+| `platform/prebuilts/cmdline-tools` | defines `lint_api`, needed by `tools/lint_checks` and the `lint/` directories under `packages/modules/*` |
+| `platform/prebuilts/maven_repo/bumptech` | `glide-prebuilt` and friends, used by `DocumentsUI` and `WallpaperPicker2` - both ship in a system image |
 
 The pattern is the same each time: a directory whose *name* says test,
 sample or obsolete defines something the rest of the tree consumes.
-Restoring all six costs about 2.7 GB, almost all of it `cts`.
+Restoring all eight costs about 2.8 GB, almost all of it `cts`.
 
-They were also found in the worst possible order - one per build, each
-several hours apart, because the build reports them one at a time. The two
-scripts in the next section find this whole class in about four minutes.
+The first seven were found in the worst possible order - one per build,
+each hours apart, because the build reports them one at a time. The
+eighth, `bumptech`, was found by `tools/check-modules.sh` and fixed before
+it broke anything. That is the difference the next section is about.
 
 ### Check before you build
 

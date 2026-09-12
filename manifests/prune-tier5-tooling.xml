@@ -41,8 +41,16 @@
        sets ALLOW_MISSING_DEPENDENCIES.
   <remove-project name="platform/prebuilts/gradle-plugin" optional="true"/>
   -->
+  <!-- NOT pruned: glide-prebuilt, glide-gifdecoder-prebuilt and
+       glide-disklrucache-prebuilt are used by packages/apps/DocumentsUI
+       and packages/apps/WallpaperPicker2, both of which ship in a system
+       image. Found by tools/check-modules.sh before it broke a build.
   <remove-project name="platform/prebuilts/maven_repo/bumptech" optional="true"/>
+  -->
+  <!-- NOT pruned: defines lint_api, which tools/lint_checks and the lint
+       directories under packages/modules/* depend on.
   <remove-project name="platform/prebuilts/cmdline-tools" optional="true"/>
+  -->
   <remove-project name="platform/prebuilts/devtools" optional="true"/>
 
   <!-- Java linters. Not run by a platform build. -->
