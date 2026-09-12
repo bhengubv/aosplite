@@ -22,24 +22,24 @@
 -->
 <manifest>
   <!-- Sample code and SDK packaging -->
-  <remove-project name="platform/developers/build" />
-  <remove-project name="platform/developers/demos" />
-  <remove-project name="platform/developers/samples/android" />
-  <remove-project name="platform/sdk" />
+  <remove-project name="platform/developers/build" optional="true"/>
+  <remove-project name="platform/developers/demos" optional="true"/>
+  <remove-project name="platform/developers/samples/android" optional="true"/>
+  <remove-project name="platform/sdk" optional="true"/>
 
   <!-- Emulator. Remove only if you boot-test on hardware or Cuttlefish. -->
-  <remove-project name="platform/prebuilts/android-emulator" />
-  <remove-project name="platform/prebuilts/qemu-kernel" />
+  <remove-project name="platform/prebuilts/android-emulator" optional="true"/>
+  <remove-project name="platform/prebuilts/qemu-kernel" optional="true"/>
 
   <!-- App-build tooling -->
-  <remove-project name="platform/prebuilts/ndk" />
-  <remove-project name="platform/prebuilts/gradle-plugin" />
-  <remove-project name="platform/prebuilts/maven_repo/bumptech" />
-  <remove-project name="platform/prebuilts/cmdline-tools" />
-  <remove-project name="platform/prebuilts/devtools" />
+  <remove-project name="platform/prebuilts/ndk" optional="true"/>
+  <remove-project name="platform/prebuilts/gradle-plugin" optional="true"/>
+  <remove-project name="platform/prebuilts/maven_repo/bumptech" optional="true"/>
+  <remove-project name="platform/prebuilts/cmdline-tools" optional="true"/>
+  <remove-project name="platform/prebuilts/devtools" optional="true"/>
 
   <!-- Java linters. Not run by a platform build. -->
-  <remove-project name="platform/prebuilts/checkstyle" />
-  <remove-project name="platform/prebuilts/checkcolor" />
-  <remove-project name="platform/prebuilts/ktlint" />
+  <remove-project name="platform/prebuilts/checkstyle" optional="true"/>
+  <remove-project name="platform/prebuilts/checkcolor" optional="true"/>
+  <remove-project name="platform/prebuilts/ktlint" optional="true"/>
 </manifest>

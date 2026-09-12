@@ -21,12 +21,12 @@
   Risk:   low
 -->
 <manifest>
-  <remove-project name="platform/prebuilts/clang/host/darwin-x86" />
-  <remove-project name="platform/prebuilts/go/darwin-x86" />
-  <remove-project name="platform/prebuilts/bazel/darwin-x86_64" />
-  <remove-project name="platform/prebuilts/jdk/jdk8" />
+  <remove-project name="platform/prebuilts/clang/host/darwin-x86" optional="true"/>
+  <remove-project name="platform/prebuilts/go/darwin-x86" optional="true"/>
+  <remove-project name="platform/prebuilts/bazel/darwin-x86_64" optional="true"/>
+  <remove-project name="platform/prebuilts/jdk/jdk8" optional="true"/>
 
   <!-- Windows cross-compiler. Only needed to build Windows host tools
        (the Windows SDK). Not needed for a device image. -->
-  <remove-project name="platform/prebuilts/gcc/linux-x86/host/x86_64-w64-mingw32-4.8" />
+  <remove-project name="platform/prebuilts/gcc/linux-x86/host/x86_64-w64-mingw32-4.8" optional="true"/>
 </manifest>

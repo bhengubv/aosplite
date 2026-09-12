@@ -16,33 +16,33 @@
 -->
 <manifest>
   <!-- Compatibility and vendor test suites -->
-  <remove-project name="platform/cts" />
-  <remove-project name="platform/test/cts-root" />
-  <remove-project name="platform/test/mts" />
-  <remove-project name="platform/test/vts" />
-  <remove-project name="platform/test/vts-testcase/hal" />
-  <remove-project name="platform/test/vts-testcase/hal-trace" />
-  <remove-project name="platform/test/vts-testcase/kernel" />
-  <remove-project name="platform/test/vts-testcase/nbu" />
-  <remove-project name="platform/test/vts-testcase/performance" />
-  <remove-project name="platform/test/vts-testcase/security" />
-  <remove-project name="platform/test/vts-testcase/vndk" />
-  <remove-project name="platform/test/app_compat/csuite" />
-  <remove-project name="platform/test/catbox" />
-  <remove-project name="platform/test/dittosuite" />
-  <remove-project name="platform/test/mlts/benchmark" />
-  <remove-project name="platform/test/mlts/models" />
-  <remove-project name="platform/test/robolectric-extensions" />
-  <remove-project name="platform/test/suite_harness" />
+  <remove-project name="platform/cts" optional="true"/>
+  <remove-project name="platform/test/cts-root" optional="true"/>
+  <remove-project name="platform/test/mts" optional="true"/>
+  <remove-project name="platform/test/vts" optional="true"/>
+  <remove-project name="platform/test/vts-testcase/hal" optional="true"/>
+  <remove-project name="platform/test/vts-testcase/hal-trace" optional="true"/>
+  <remove-project name="platform/test/vts-testcase/kernel" optional="true"/>
+  <remove-project name="platform/test/vts-testcase/nbu" optional="true"/>
+  <remove-project name="platform/test/vts-testcase/performance" optional="true"/>
+  <remove-project name="platform/test/vts-testcase/security" optional="true"/>
+  <remove-project name="platform/test/vts-testcase/vndk" optional="true"/>
+  <remove-project name="platform/test/app_compat/csuite" optional="true"/>
+  <remove-project name="platform/test/catbox" optional="true"/>
+  <remove-project name="platform/test/dittosuite" optional="true"/>
+  <remove-project name="platform/test/mlts/benchmark" optional="true"/>
+  <remove-project name="platform/test/mlts/models" optional="true"/>
+  <remove-project name="platform/test/robolectric-extensions" optional="true"/>
+  <remove-project name="platform/test/suite_harness" optional="true"/>
 
   <!-- Test harnesses and runners -->
-  <remove-project name="platform/tools/tradefederation" />
-  <remove-project name="platform/tools/tradefederation/contrib" />
-  <remove-project name="platform/tools/tradefederation/prebuilts" />
-  <remove-project name="platform/tools/loganalysis" />
-  <remove-project name="platform/tools/test/connectivity" />
-  <remove-project name="platform/tools/test/mobly_extensions" />
-  <remove-project name="platform/tools/test/mobly_snippets" />
-  <remove-project name="platform/tools/test/openhst" />
-  <remove-project name="kernel/tests" />
+  <remove-project name="platform/tools/tradefederation" optional="true"/>
+  <remove-project name="platform/tools/tradefederation/contrib" optional="true"/>
+  <remove-project name="platform/tools/tradefederation/prebuilts" optional="true"/>
+  <remove-project name="platform/tools/loganalysis" optional="true"/>
+  <remove-project name="platform/tools/test/connectivity" optional="true"/>
+  <remove-project name="platform/tools/test/mobly_extensions" optional="true"/>
+  <remove-project name="platform/tools/test/mobly_snippets" optional="true"/>
+  <remove-project name="platform/tools/test/openhst" optional="true"/>
+  <remove-project name="kernel/tests" optional="true"/>
 </manifest>

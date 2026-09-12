@@ -162,6 +162,17 @@ mkdir -p ~/android && cd ~/android
 repo init -u https://android.googlesource.com/platform/manifest -b android-15.0.0_r20 --depth=1 --no-tags
 ```
 
+If you use a different release tag, that is fine. The prune tiers carry
+`optional="true"` on every `remove-project`, so entries that do not exist
+on your branch are skipped instead of stopping the sync with:
+
+```
+error: remove-project element specifies non-existent project
+```
+
+```bash
+```
+
 What the flags do, since they are half the saving in this repository:
 
 | Flag | Effect |

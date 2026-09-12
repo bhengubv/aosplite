@@ -233,6 +233,10 @@ repo init --mirror -u https://android.googlesource.com/platform/manifest
 `android-15.0.0_r20` manifest. 133 entries, 0 dead. Re-checkable in
 seconds with the command above.
 
+**Verified on a second branch:** `repo init` and `repo sync` complete
+against `android-16.0.0_r4`. This needed a fix - see *Branch
+portability* below.
+
 **Not verified:** no tree has been synced with these tiers applied, no
 build has been run, and `products/lite_arm64.mk` has never been booted.
 The size figures are estimates, not measurements.
@@ -261,3 +265,27 @@ failure rather than a saving.
 ## Licence
 
 Apache 2.0, matching AOSP.
+
+## Branch portability
+
+The tiers were written against `android-15.0.0_r20`. Projects come and go
+between releases, and `repo` treats a `remove-project` naming a project
+that is not in the manifest as a fatal error:
+
+```
+error: in `sync`: remove-project element specifies non-existent project:
+<remove-project name="platform/test/vts-testcase/hal-trace"/>
+```
+
+That is one dead entry stopping an entire sync. Every `remove-project` in
+this repository therefore carries `optional="true"`, which tells `repo` to
+skip an entry it cannot resolve instead of aborting:
+
+```xml
+<remove-project name="platform/test/vts-testcase/hal-trace" optional="true"/>
+```
+
+The tiers now apply to any branch. Entries that do not exist on your
+branch are ignored; the rest still prune. `tools/verify-manifest.sh
+--tag <branch>` tells you how many resolved, so a silently-skipped entry
+is still countable rather than invisible.

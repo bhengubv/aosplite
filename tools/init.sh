@@ -3,8 +3,11 @@
 #
 #   tools/init.sh <target-dir> [aosp-branch] [tier-count]
 #
-# Default branch is android-15.0.0_r20. Default is all five tiers; pass a
-# lower number to apply fewer.
+# Default branch is android-15.0.0_r20 - the branch the tiers were verified
+# against. Other branches work: every remove-project carries
+# optional="true", so entries that do not exist on your branch are skipped
+# rather than aborting the sync. android-16.0.0_r4 is known to init and
+# sync. Default is all five tiers; pass a lower number to apply fewer.
 #
 # Applying tiers one at a time and running `m nothing` between them is
 # the way to find out which one broke your target. This script does not
