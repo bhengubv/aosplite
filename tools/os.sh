@@ -538,6 +538,20 @@ if runs build; then
             # Rate over the last interval, because the early actions are
             # not representative - analysis-adjacent work runs far faster
             # than the C++ and Java that follows.
+            # First interval after ninja appears is not a rate: most of
+            # that window was Soong analysis, which produces no actions.
+            # Measuring across it reported 37 hours on a build that was
+            # running at 246 actions/min and finished in nine. Seed the
+            # baseline and wait for a clean interval.
+            if [ "$prev_done" = 0 ]; then
+                prev_done=$done_now
+                prev_time=$SECONDS
+                printf '  %s%s%s  %s]  measuring rate  %s
+'                        "$DIM" "$(date '+%H:%M:%S')" "$OFF" "$progress" "$mem"
+                publish "building  $progress]  measuring rate  $mem"
+                continue
+            fi
+
             dt=$(( SECONDS - prev_time ))
             dn=$(( done_now - prev_done ))
             prev_time=$SECONDS
