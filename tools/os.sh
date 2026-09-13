@@ -43,6 +43,7 @@ TARGET="systemimage"
 REFERENCE=""                   # GSI to verify against
 JOBS="$(nproc)"
 MAX_RETRIES=8
+REPORT_EVERY=1200          # seconds between progress lines during a build
 PHASES="doctor sync check build verify"
 
 usage() {
@@ -61,6 +62,7 @@ Options
   --jobs N               default nproc
   --phases "a b c"       run only these: doctor sync check build verify
   --retries N            default 8
+  --report-every SECS    progress line during a build, default 1200 (20 min)
 
 Exit codes
   0  image built (and verified, if a reference was given)
@@ -84,6 +86,7 @@ while [ $# -gt 0 ]; do
         --jobs) JOBS="$2"; shift ;;
         --phases) PHASES="$2"; shift ;;
         --retries) MAX_RETRIES="$2"; shift ;;
+        --report-every) REPORT_EVERY="$2"; shift ;;
         -h|--help) usage 0 ;;
         *) echo "unknown option: $1" >&2; usage 1 ;;
     esac
@@ -286,12 +289,35 @@ if runs build; then
     attempt=1
     while :; do
         info "attempt $attempt of $MAX_RETRIES"
+
         set +e
         ( cd "$TREE"
           # shellcheck disable=SC1091
           source build/envsetup.sh >/dev/null
           lunch "$LUNCH" >/dev/null
-          m -j"$JOBS" "$TARGET" ) > "$LOG" 2>&1
+          m -j"$JOBS" "$TARGET" ) > "$LOG" 2>&1 &
+        build_pid=$!
+
+        # Report while it runs. A build is hours long and silence is
+        # indistinguishable from a hang - which is how a build that died at
+        # 00:58 went unnoticed until 05:47. Each line is timestamped, says
+        # which phase and how far through, and shows the memory headroom
+        # that decides whether it survives.
+        last_report=$SECONDS
+        while kill -0 "$build_pid" 2>/dev/null; do
+            sleep 20
+            [ $((SECONDS - last_report)) -ge "$REPORT_EVERY" ] || continue
+            last_report=$SECONDS
+
+            progress=$(grep -oE '^\[ *[0-9]+% [0-9]+/[0-9]+' "$LOG" 2>/dev/null | tail -1)
+            stage=$(tail -1 "$LOG" 2>/dev/null | cut -c1-60)
+            mem=$(free -g | awk '/^Mem:/{a=$7} /^Swap:/{s=$3; t=$2} END{printf "%sG free, swap %s/%sG", a, s, t}')
+            printf '  %s%s%s  %s  %s\n' "$DIM" "$(date '+%H:%M:%S')" "$OFF" \
+                   "${progress:-starting}]" "$mem"
+            [ -n "$progress" ] || printf '           %s%s%s\n' "$DIM" "$stage" "$OFF"
+        done
+
+        wait "$build_pid"
         rc=$?
         set -e
 
