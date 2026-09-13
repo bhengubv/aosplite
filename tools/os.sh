@@ -51,6 +51,7 @@ AUTO_FIX=1                 # close the loop by default: fix, learn, rebuild
 REPORT_EVERY=1200          # seconds between progress lines during a build
 STATUS_DIR=""              # where to publish status; auto-detected on WSL
 RULES=""                   # tools/failure-rules.txt; set once SELF is known
+POPUPS=1                   # desktop notification on failure and completion
 PHASES="doctor sync check build verify flash boot"
 VBMETA=""                  # blank vbmeta to flash with verification off
 WIPE=1                     # required after changing the boot state
@@ -78,6 +79,7 @@ Options
                          Without it a device refuses a self-built image
   --serial S             adb/fastboot serial, if more than one device
   --no-wipe              skip erasing userdata (it will usually not boot)
+  --no-popups            no desktop notification; STATUS.txt still written
   --boot-timeout SECS    default 2400
   --retries N            default 8
   --report-every SECS    progress line during a build, default 1200 (20 min)
@@ -113,6 +115,7 @@ while [ $# -gt 0 ]; do
         --report-every) REPORT_EVERY="$2"; shift ;;
         --auto-fix) AUTO_FIX=1 ;;
         --no-auto-fix) AUTO_FIX=0 ;;
+        --no-popups) POPUPS=0 ;;
         --status-dir) STATUS_DIR="$2"; shift ;;
         --vbmeta) VBMETA="$2"; shift ;;
         --serial) SERIAL="$2"; shift ;;
@@ -233,16 +236,24 @@ publish() {
 }
 
 popup() {
-    # A dialog on the Windows desktop. Failure and completion only -
-    # anything more frequent gets dismissed without being read.
-    command -v powershell.exe >/dev/null 2>&1 || return 0
-    local title body
-    title=$(printf '%s' "$1" | tr -d "'")
-    body=$(printf '%s' "$2" | tr -d "'")
-    powershell.exe -NoProfile -Command \
-        "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('$body','$title') | Out-Null" \
-        >/dev/null 2>&1 &
+    # Notify without leaving a process resident.
+    #
+    # This used to raise a WPF MessageBox. That loads PresentationFramework
+    # - about 100 MB - and blocks until someone clicks it, so an unattended
+    # failure at 3am left PowerShell holding that memory until morning. On
+    # a machine where soong_build wants 22 GB, that is not free.
+    #
+    # msg.exe is a few MB, prints to the desktop and exits immediately. If
+    # it is unavailable the status file and the terminal bell still carry
+    # the message, so nothing is lost by skipping it.
+    [ "$POPUPS" = 1 ] || return 0
+    command -v msg.exe >/dev/null 2>&1 || return 0
+    local text
+    text=$(printf '%s: %s' "$1" "$2" | tr -d "'\"" | cut -c1-250)
+    msg.exe "$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '
+')"         /TIME:600 "$text" >/dev/null 2>&1 || true
 }
+
 
 # Loud on purpose. A failure buried in a scrolling log is how a build that
 # died at 00:58 went unnoticed until 05:47. Prints a banner and rings the
