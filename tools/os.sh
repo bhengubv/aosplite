@@ -304,17 +304,53 @@ if runs build; then
         # which phase and how far through, and shows the memory headroom
         # that decides whether it survives.
         last_report=$SECONDS
+        build_start=$SECONDS
+        prev_done=0
+        prev_time=$SECONDS
         while kill -0 "$build_pid" 2>/dev/null; do
             sleep 20
             [ $((SECONDS - last_report)) -ge "$REPORT_EVERY" ] || continue
             last_report=$SECONDS
 
             progress=$(grep -oE '^\[ *[0-9]+% [0-9]+/[0-9]+' "$LOG" 2>/dev/null | tail -1)
-            stage=$(tail -1 "$LOG" 2>/dev/null | cut -c1-60)
             mem=$(free -g | awk '/^Mem:/{a=$7} /^Swap:/{s=$3; t=$2} END{printf "%sG free, swap %s/%sG", a, s, t}')
-            printf '  %s%s%s  %s  %s\n' "$DIM" "$(date '+%H:%M:%S')" "$OFF" \
-                   "${progress:-starting}]" "$mem"
-            [ -n "$progress" ] || printf '           %s%s%s\n' "$DIM" "$stage" "$OFF"
+
+            if [ -z "$progress" ]; then
+                # Analysis, before ninja has a graph to count. Say how long
+                # it has been, not nothing.
+                printf '  %s%s%s  analysis, %d min elapsed  %s\n' \
+                       "$DIM" "$(date '+%H:%M:%S')" "$OFF" \
+                       $(( (SECONDS - build_start) / 60 )) "$mem"
+                printf '           %s%s%s\n' "$DIM" "$(tail -1 "$LOG" 2>/dev/null | cut -c1-60)" "$OFF"
+                continue
+            fi
+
+            done_now=$(echo "$progress" | grep -oE '[0-9]+/' | tr -d '/')
+            total=$(grep -oE '^\[ *[0-9]+% [0-9]+/[0-9]+' "$LOG" | tail -1 |
+                    awk -F/ '{print $2}')
+
+            # Rate over the last interval, because the early actions are
+            # not representative - analysis-adjacent work runs far faster
+            # than the C++ and Java that follows.
+            dt=$(( SECONDS - prev_time ))
+            dn=$(( done_now - prev_done ))
+            prev_time=$SECONDS
+            prev_done=$done_now
+
+            eta="?"
+            if [ "$dt" -gt 0 ] && [ "$dn" -gt 0 ]; then
+                rate=$(( dn * 60 / dt ))                 # actions per minute
+                [ "$rate" -gt 0 ] && {
+                    left=$(( total - done_now ))
+                    mins=$(( left / rate ))
+                    eta=$(printf '%dh%02dm left, done ~%s' \
+                          $(( mins / 60 )) $(( mins % 60 )) \
+                          "$(date -d "+$mins minutes" '+%H:%M' 2>/dev/null || echo '?')")
+                }
+            fi
+
+            printf '  %s%s%s  %s]  %s  %s\n' \
+                   "$DIM" "$(date '+%H:%M:%S')" "$OFF" "$progress" "$eta" "$mem"
         done
 
         wait "$build_pid"
