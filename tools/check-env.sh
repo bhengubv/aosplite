@@ -245,6 +245,42 @@ if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
 fi
 
 echo
+echo "=== local modifications ==="
+
+# A patched build system is invisible and changes everything. On one
+# machine build/soong carried "Enabled: false" against nsjail's sandbox
+# for weeks - a deliberate local fix, recorded nowhere, that made that
+# tree behave unlike every other checkout. Anyone comparing results
+# against it is comparing against something else.
+for proj in build/soong build/make build/blueprint; do
+    d="$TREE/$proj"
+    [ -d "$d/.git" ] || continue
+    n=$(cd "$d" && git status --porcelain 2>/dev/null | wc -l)
+    if [ "$n" -gt 0 ]; then
+        soft "$proj has $n uncommitted change(s)"
+        (cd "$d" && git status --porcelain 2>/dev/null | head -5 | sed 's/^/            /')
+        say "" "The build system itself is modified. Results from this tree"
+        say "" "will not match a clean checkout. Record why, or revert it."
+    else
+        ok "$proj clean"
+    fi
+done
+
+# A backup file left beside the thing it backs up is read as source. It
+# has happened twice here: a .orig inside res/values made aapt2 fail with
+# "invalid file path", and a saved .rc in /system/etc/init was parsed as
+# an init script. Keep backups outside the tree.
+strays=$(find "$TREE/vendor" "$TREE/device" -maxdepth 6             \( -name "*.orig" -o -name "*.orig-*" -o -name "*.bak"                -o -name "*~" -o -name "*.save" \) 2>/dev/null | head -10)
+if [ -n "$strays" ]; then
+    soft "backup files inside the source tree"
+    echo "$strays" | sed "s|$TREE/||" | sed 's/^/            /'
+    say "" "aapt2 and init read whatever is in the directory. Move these"
+    say "" "somewhere outside the tree."
+else
+    ok "no stray backup files under vendor/ or device/"
+fi
+
+echo
 echo "=== power ==="
 
 # Suspending sends SIGTERM to soong_ui. The log says "Got signal:
