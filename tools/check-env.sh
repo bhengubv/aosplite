@@ -245,6 +245,77 @@ if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
 fi
 
 echo
+echo "=== host tools ==="
+
+# Missing tools fail at the least useful moment. repo goes missing when a
+# shell does not have ~/bin on PATH; debugfs is only needed for image
+# checks but is absent from a minimal install.
+for t in repo python3 git; do
+    if command -v "$t" >/dev/null 2>&1; then
+        ok "$t $(command -v "$t")"
+    else
+        bad "$t not on PATH"
+    fi
+done
+command -v debugfs >/dev/null 2>&1     && ok "debugfs (needed by check-image.sh)"     || soft "debugfs missing - check-image.sh will not run (apt install e2fsprogs)"
+
+echo
+echo "=== the machine changing under you ==="
+
+# This is the root of the worst cascade in this project's history. An
+# unrelated "apt install fail2ban" pulled package upgrades with it, one of
+# which switched on kernel.apparmor_restrict_unprivileged_userns. That
+# broke nsjail, which broke Soong, and the error named neither. Nothing
+# about the build had changed.
+if systemctl is-enabled unattended-upgrades >/dev/null 2>&1; then
+    soft "unattended-upgrades is enabled"
+    say "" "Package upgrades land mid-build and change the machine. One of"
+    say "" "them switching on the AppArmor userns restriction broke Soong's"
+    say "" "sandbox here, and the failure named neither AppArmor nor nsjail."
+    say "" "Consider masking it while a long build runs."
+else
+    ok "unattended-upgrades not enabled"
+fi
+
+if [ -f /var/run/reboot-required ]; then
+    soft "a reboot is pending"
+    say "" "Packages have been upgraded since boot. The running kernel and"
+    say "" "the installed one differ, which is how a sandbox that worked"
+    say "" "yesterday stops working today."
+fi
+
+echo
+echo "=== out/ ==="
+
+# "Tried to lock out/.lock, but timed out" means another soong is running,
+# or one died holding it. Either way the build will not start, and the
+# message does not say which.
+if [ -f "$TREE/out/.lock" ]; then
+    holder=$(fuser "$TREE/out/.lock" 2>/dev/null | tr -d ' ' || true)
+    if [ -n "$holder" ]; then
+        bad "out/.lock is held by pid $holder - another build is running"
+        say "" "$(ps -o args= -p "$holder" 2>/dev/null | head -1 | cut -c1-70)"
+    else
+        ok "out/.lock present, not held"
+    fi
+else
+    ok "no stale out/.lock"
+fi
+
+# ccache living outside the paths Soong's sandbox can write to is silent:
+# every compile misses, the cache never fills, and nothing says why. Only
+# relevant while nsjail is in play.
+if [ -n "${CCACHE_DIR:-}" ]; then
+    case "$(readlink -f "${CCACHE_DIR}")" in
+        "$(readlink -f "$TREE")"/*|/tmp/*) ok "CCACHE_DIR is inside a writable mount" ;;
+        *) soft "CCACHE_DIR=$CCACHE_DIR is outside the tree and /tmp"
+           say "" "Soong's nsjail sandbox mounts / read-only and only makes the"
+           say "" "tree and /tmp writable. A cache outside those misses every"
+           say "" "time and never fills, silently." ;;
+    esac
+fi
+
+echo
 echo "=== local modifications ==="
 
 # A patched build system is invisible and changes everything. On one
