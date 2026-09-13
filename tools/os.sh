@@ -15,18 +15,22 @@
 #   sync     repo init and sync, skipped if the tree is already there
 #   check    on a pruned tree, what the prune broke - paths and module
 #            names that nothing in the tree provides any more
-#   build    and if it fails, read the log, match it against the failures
-#            below, apply the fix, and try again
+#   build    and if it fails: identify it against tools/failure-rules.txt,
+#            restore the project it names, write a new rule if the failure
+#            was not yet known, and rebuild. The loop closes itself.
 #   verify   the built image against a reference GSI, before you flash it
+#   flash    onto the device: fastbootd, system, blank vbmeta, wipe
+#   boot     wait for sys.boot_completed and confirm the fingerprint is
+#            CircleOS. Done means the OS is running, not that a file exists.
 #
-# The retry loop is the point. A pruned AOSP tree reports missing projects
-# one per build, hours apart, because ALLOW_MISSING_DEPENDENCIES turns a
-# missing dependency into a runtime "echo ... && false". Seven projects
-# were found that way over two days. The table at the bottom of this file
-# turns each of those into something the script handles by itself.
+# The loop is the point. A pruned AOSP tree reports missing projects one
+# per build, hours apart, because ALLOW_MISSING_DEPENDENCIES turns a
+# missing dependency into a runtime "echo ... && false". Nine projects were
+# found that way over two days, each costing a rebuild to discover.
 #
-# Every entry in that table is a build that actually died. Add to it when
-# one dies in a new way.
+# So the script does the whole cycle: identify, fix, learn, rebuild. The
+# learning matters more than the fixing - a rule written into
+# tools/failure-rules.txt is one nobody has to find again, on any machine.
 
 set -eo pipefail
 
@@ -43,10 +47,16 @@ TARGET="systemimage"
 REFERENCE=""                   # GSI to verify against
 JOBS="$(nproc)"
 MAX_RETRIES=8
-AUTO_FIX=0                 # opt in; a failure stops the build by default
+AUTO_FIX=1                 # close the loop by default: fix, learn, rebuild
 REPORT_EVERY=1200          # seconds between progress lines during a build
 STATUS_DIR=""              # where to publish status; auto-detected on WSL
-PHASES="doctor sync check build verify"
+RULES=""                   # tools/failure-rules.txt; set once SELF is known
+PHASES="doctor sync check build verify flash boot"
+VBMETA=""                  # blank vbmeta to flash with verification off
+WIPE=1                     # required after changing the boot state
+SERIAL=""                  # adb/fastboot serial, if more than one device
+BOOT_TIMEOUT=2400          # 40 min; a first boot on a wiped device is slow
+BOOT_STALL=900             # 15 min with no new service = hung
 
 usage() {
     sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
@@ -63,12 +73,20 @@ Options
   --reference IMG        GSI to verify the built image against
   --jobs N               default nproc
   --phases "a b c"       run only these: doctor sync check build verify
+                         flash boot
+  --vbmeta IMG           blank vbmeta, flashed with verification disabled.
+                         Without it a device refuses a self-built image
+  --serial S             adb/fastboot serial, if more than one device
+  --no-wipe              skip erasing userdata (it will usually not boot)
+  --boot-timeout SECS    default 2400
   --retries N            default 8
   --report-every SECS    progress line during a build, default 1200 (20 min)
-  --auto-fix             on a recognised failure, restore the project and
-                         retry. Off by default: a failure stops the build
-                         and says what it is, because a retry loop that
-                         guesses wrong is worse than one that stops
+  --no-auto-fix          stop on the first failure instead of fixing it.
+                         By default os.sh closes the loop: identify the
+                         failure, restore the project, write the rule into
+                         tools/failure-rules.txt so it is never
+                         rediscovered, and rebuild. Failures are loud
+                         either way - banner, STATUS.txt, desktop dialog.
 
 Exit codes
   0  image built (and verified, if a reference was given)
@@ -94,7 +112,12 @@ while [ $# -gt 0 ]; do
         --retries) MAX_RETRIES="$2"; shift ;;
         --report-every) REPORT_EVERY="$2"; shift ;;
         --auto-fix) AUTO_FIX=1 ;;
+        --no-auto-fix) AUTO_FIX=0 ;;
         --status-dir) STATUS_DIR="$2"; shift ;;
+        --vbmeta) VBMETA="$2"; shift ;;
+        --serial) SERIAL="$2"; shift ;;
+        --no-wipe) WIPE=0 ;;
+        --boot-timeout) BOOT_TIMEOUT="$2"; shift ;;
         -h|--help) usage 0 ;;
         *) echo "unknown option: $1" >&2; usage 1 ;;
     esac
@@ -105,6 +128,7 @@ done
 [ -n "$PRODUCT" ] || PRODUCT=$([ "$MODE" = lite ] && echo lite_arm64 || echo aosp_arm64)
 LUNCH="$PRODUCT-$RELEASE-$VARIANT"
 LOG="$TREE/out/os-sh.log"
+RULES="${RULES:-$SELF/tools/failure-rules.txt}"
 
 # ------------------------------------------------------------------ output
 BOLD=""; DIM=""; OFF=""
@@ -132,6 +156,49 @@ die() {
 }
 
 runs() { case " $PHASES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+find_tool() {
+    # $1 = adb|fastboot, $2 = variable to set.
+    #
+    # Under WSL the platform-tools usually live on the Windows side, and
+    # WSL's view of /mnt/c is not always complete - on one machine here
+    # AppData/Local/Android is missing from the WSL listing entirely while
+    # Windows sees it. So: look in several places, and if none of them
+    # work, say so now rather than polling a device that was never
+    # reachable.
+    local want="$1" var="$2" found="" c
+    eval "found=\${$var:-}"
+    if [ -n "$found" ] && [ -x "$found" ]; then return 0; fi
+
+    for c in "$want" "$want.exe"; do
+        if command -v "$c" >/dev/null 2>&1; then
+            eval "$var=\$(command -v '$c')"
+            return 0
+        fi
+    done
+
+    if command -v wslpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+        local up
+        up=$(cd /mnt/c 2>/dev/null && cmd.exe /c 'echo %LOCALAPPDATA%' 2>/dev/null | tr -d '
+')
+        [ -n "$up" ] && up=$(wslpath -u "$up" 2>/dev/null || true)
+        for c in "$up/Android/Sdk/platform-tools/$want.exe"                  "/mnt/c/platform-tools/$want.exe"                  "/usr/lib/android-sdk/platform-tools/$want"; do
+            if [ -x "$c" ]; then eval "$var='$c'"; return 0; fi
+        done
+    fi
+
+    die "cannot find $want.
+
+  Looked on PATH, and for the Windows SDK under %LOCALAPPDATA%.
+
+  Under WSL this often means WSL cannot see the Android SDK even though
+  Windows can - check with:
+      ls /mnt/c/Users/<you>/AppData/Local/Android/Sdk/platform-tools
+
+  If that is empty, run the flash and boot phases from Windows instead,
+  or pass the path explicitly:
+      ADB=/path/to/adb FASTBOOT=/path/to/fastboot tools/os.sh ..."
+}
 
 # ------------------------------------------------------------ publishing
 #
@@ -303,70 +370,95 @@ fi
 #
 #   signature                             provided by
 fix_for_signature() {
-    local log="$1"
-    local s errs
+    # Reads tools/failure-rules.txt rather than hard-coding the table, so
+    # a new rule is a line of data, not an edit to this script. That is
+    # what lets the loop close: identify, fix, learn, rebuild.
+    local log="$1" errs sig project s
 
-    # Only look at failure context. Scanning the whole log matches
-    # successful work: a line like
+    # Only the failure context. Scanning the whole log matches successful
+    # work - a line like
     #   [3% 4703/154564] //prebuilts/gradle-plugin:metalava-gradle-plugin-deps
     # names a module that built fine, and matching on it restored a project
     # that was never missing while the real failure went unread.
     errs=$(mktemp)
     grep -A3 -E "^FAILED:|^error:|^ninja: error" "$log" > "$errs" 2>/dev/null || true
-    grep -E "missing dependencies|unrecognized module type|no known rule to make"         "$log" >> "$errs" 2>/dev/null || true
-    log="$errs"
+    grep -E "missing dependencies|unrecognized module type|no known rule to make" \
+        "$log" >> "$errs" 2>/dev/null || true
 
-    # A missing Soong module type. Fails during analysis, so it is cheap
-    # to hit but stops everything.
-    if grep -q 'unrecognized module type "csuite_test"' "$log"; then
-        echo "platform/test/app_compat/csuite"; return 0; fi
+    while IFS=$'\t' read -r sig project; do
+        case "$sig" in ''|'#'*) continue ;; esac
+        [ -n "$project" ] || continue
+        if grep -qF "$sig" "$errs" 2>/dev/null; then
+            rm -f "$errs"
+            echo "$project"
+            return 0
+        fi
+    done < "$RULES"
 
-    # Missing defaults blocks. cts_defaults and mts-target-sdk-version-current
-    # are defined in platform/cts and used by the tests/cts directories that
-    # ship inside packages/modules/*.
-    if grep -qE 'undefined module "(cts_defaults|mts-target-sdk-version-current)"' "$log"; then
-        echo "platform/cts"; return 0; fi
-
-    # trusty needs a dirgroup defined in the vts hal tests.
-    if grep -q 'trusty_dirgroup_test_vts-testcase_hal' "$log"; then
-        echo "platform/test/vts-testcase/hal"; return 0; fi
-
-    # A PRODUCT_COPY_FILES source. Fails at packaging, after everything has
-    # compiled, which makes it the most expensive of these to hit.
-    if grep -q "device/sample/etc/apns-full-conf.xml.*missing" "$log"; then
-        echo "device/sample"; return 0; fi
-
-    # guava compiles against jdk8 even though the build runs on jdk21.
-    if grep -q 'prebuilts/jdk/jdk8/linux-x86/jre/lib/\(rt\|jce\)\.jar' "$log"; then
-        echo "platform/prebuilts/jdk/jdk8"; return 0; fi
-
-    if grep -q 'metalava-gradle-plugin-deps' "$log"; then
-        echo "platform/prebuilts/gradle-plugin"; return 0; fi
-
-    if grep -q 'missing dependencies: lint_api' "$log"; then
-        echo "platform/prebuilts/cmdline-tools"; return 0; fi
-
-    if grep -qE 'missing dependencies:.*glide-(prebuilt|gifdecoder|disklrucache)' "$log"; then
-        echo "platform/prebuilts/maven_repo/bumptech"; return 0; fi
-
-    # Launcher3 provides an aconfig flags library that frameworks/base
-    # links against - services/core and the WindowManager Shell both do -
-    # so pruning the launcher breaks the framework, not just the launcher.
-    if grep -q 'com_android_launcher3_flags_lib' "$log"; then
-        echo "platform/packages/apps/Launcher3"; return 0; fi
-
-    # Generic fallback: Soong names the module, and for a great many of
-    # them the project is the module's own directory. Only used when
-    # nothing above matched.
-    s=$(grep -oE 'depends on undefined module "[^"]+"' "$log" | head -1 |
+    # Not covered. Name the missing thing so the caller can try to resolve
+    # it and write a new rule.
+    s=$(grep -oE 'depends on undefined module "[^"]+"' "$errs" | head -1 |
         sed 's/.*"\(.*\)"/\1/') || true
-    if [ -n "$s" ]; then
-        echo "UNKNOWN:$s"; return 0
-    fi
-    s=$(grep -oE 'module [A-Za-z0-9_.-]+ missing dependencies: [^ ]+' "$log" |
+    [ -z "$s" ] && s=$(grep -oE 'missing dependencies: [^ ,]+' "$errs" |
         head -1 | awk '{print $NF}') || true
+    [ -z "$s" ] && s=$(grep -oE "'[^']+' *, needed by" "$errs" | head -1 |
+        tr -d "'" | awk '{print $1}') || true
+    rm -f "$errs"
     [ -n "$s" ] && { echo "UNKNOWN:$s"; return 0; }
     return 1
+}
+
+resolve_project() {
+    # Which pruned project provides $1? Two ways, cheapest first.
+    #
+    # If it looks like a path, the answer is the longest pruned project
+    # that is a prefix of it. If it is a module name, ask the upstream
+    # manifest for a project whose path ends in that name - which catches
+    # prebuilts and app projects, the two that keep coming up.
+    local want="$1" best="" p
+    while read -r p; do
+        case "$want" in
+            "${p#platform/}"/*|"$p"/*)
+                [ ${#p} -gt ${#best} ] && best="$p" ;;
+        esac
+    done < <(pruned_projects)
+    [ -n "$best" ] && { echo "$best"; return 0; }
+
+    while read -r p; do
+        case "${p##*/}" in
+            "$want") echo "$p"; return 0 ;;
+        esac
+    done < <(pruned_projects)
+    return 1
+}
+
+pruned_projects() {
+    python3 - "$TREE" <<'PRUNED'
+import sys, glob, os, xml.etree.ElementTree as ET
+tree = sys.argv[1]
+for f in sorted(glob.glob(os.path.join(tree, ".repo", "local_manifests", "*.xml"))):
+    try:
+        for e in ET.parse(f).getroot().findall("remove-project"):
+            if e.get("name"):
+                print(e.get("name"))
+    except Exception:
+        pass
+PRUNED
+}
+
+learn_rule() {
+    # Append a rule so this failure is recognised next time, here and on
+    # every machine that pulls the repository. The comment records when and
+    # from what, because a bare mapping with no provenance is the thing
+    # nobody dares delete later.
+    local sig="$1" project="$2"
+    grep -qF "$sig" "$RULES" 2>/dev/null && return 0
+    {
+        printf '\n# learned %s: the build failed with this and %s fixed it\n' \
+               "$(date '+%Y-%m-%d')" "$project"
+        printf '%s\t%s\n' "$sig" "$project"
+    } >> "$RULES"
+    info "learned: '$sig' -> $project (written to $(basename "$RULES"))"
 }
 
 unprune() {
@@ -530,13 +622,30 @@ if runs build; then
 
         case "$project" in
             UNKNOWN:*)
-                die "Missing module '${project#UNKNOWN:}', and this script does not
-  know which project provides it. Find it upstream, comment the
-  remove-project entry out in the relevant manifest, run
-  'repo sync -c -j$JOBS --no-clone-bundle <project>', then add a rule to
-  fix_for_signature() in $(basename "${BASH_SOURCE[0]}") so the next person
-  does not have to.
-  Log: $LOG" ;;
+                # No rule covers this. Try to work out which pruned project
+                # provides it, and if that succeeds, write the rule down so
+                # this failure is never rediscovered - here or on any other
+                # machine that pulls the repository.
+                missing="${project#UNKNOWN:}"
+                info "no rule for '$missing' - resolving"
+                set +e
+                project=$(resolve_project "$missing")
+                found=$?
+                set -e
+                if [ "$found" != 0 ] || [ -z "$project" ]; then
+                    die "Missing '$missing', and no pruned project obviously provides it.
+  Find it upstream, comment the remove-project entry out in the relevant
+  manifest, sync it, then add a line to
+  $(basename "$RULES"):
+
+      $missing<TAB><project>
+
+  so the next build already knows.
+  Log: $LOG"
+                fi
+                info "resolved: $missing is provided by $project"
+                learn_rule "$missing" "$project"
+                ;;
         esac
 
         info "restoring $project and retrying"
@@ -565,6 +674,176 @@ if runs verify; then
         [ "$rc" = 0 ] || die "the image has differences that stop a device booting.
   Fix those before flashing - a bad flash costs a wipe and destroys the
   kernel log that would tell you why."
+    fi
+fi
+
+# ================================================================== flash
+#
+# An image that builds is not an OS. The only measure that counts is
+# CircleOS running on the device, so the flow does not end at a .img.
+#
+# Everything here was learned the hard way on a Pixel 7a:
+#
+#   - flashing the system partition needs USERSPACE fastboot (fastbootd).
+#     Bootloader fastboot cannot write a logical partition and says so in
+#     a way that reads like a driver problem.
+#   - vbmeta has to be written with verification disabled or the device
+#     shows "your device is corrupt" and refuses. That in turn forces a
+#     data wipe, because the encryption keys are tied to the boot state.
+#   - the kernel log that says WHY a boot failed lives in RAM. It survives
+#     a reboot but not a power-off, and userspace fastboot runs its own
+#     kernel and overwrites it. One look per flash.
+
+adb_() { "$ADB" ${SERIAL:+-s "$SERIAL"} "$@"; }
+fb_()  { "$FASTBOOT" ${SERIAL:+-s "$SERIAL"} "$@"; }
+
+device_state() {
+    if fb_ devices 2>/dev/null | grep -q fastboot; then echo fastboot
+    elif adb_ get-state 2>/dev/null | grep -q device; then echo adb
+    else echo none; fi
+}
+
+if runs flash; then
+    phase "flash"
+
+    find_tool adb  ADB
+    find_tool fastboot FASTBOOT
+
+    IMG="${IMG:-$(ls -t "$TREE"/out/target/product/*/system.img 2>/dev/null | head -1)}"
+    [ -n "$IMG" ] && [ -f "$IMG" ] || die "no system.img to flash under $TREE/out/target/product/"
+    info "image  : $IMG ($(du -h "$IMG" | cut -f1))"
+
+    case "$(device_state)" in
+        none) die "no device. Connect it, enable USB debugging, and make sure
+  the bootloader is unlocked." ;;
+        adb)  info "device in Android - rebooting to userspace fastboot"
+              adb_ reboot fastboot >/dev/null 2>&1 || true
+              sleep 25 ;;
+    esac
+
+    # Must be userspace fastboot. The bootloader's fastboot cannot write a
+    # logical partition inside super.
+    userspace=$(fb_ getvar is-userspace 2>&1 | grep -oE 'is-userspace: *[a-z]+' | awk '{print $2}')
+    if [ "$userspace" != yes ]; then
+        info "in bootloader fastboot - rebooting to fastbootd"
+        fb_ reboot fastboot >/dev/null 2>&1 || true
+        sleep 25
+        userspace=$(fb_ getvar is-userspace 2>&1 | grep -oE 'is-userspace: *[a-z]+' | awk '{print $2}')
+    fi
+    [ "$userspace" = yes ] || die "could not reach userspace fastboot (fastbootd).
+  Writing the system partition is impossible from bootloader fastboot."
+
+    slot=$(fb_ getvar current-slot 2>&1 | grep -oE 'current-slot: *[a-z]+' | awk '{print $2}')
+    info "slot   : ${slot:-unknown}"
+    publish "flashing to slot ${slot:-?} $(date '+%H:%M:%S')"
+
+    info "flashing system"
+    fb_ flash system "$IMG" 2>&1 | tail -2 | sed 's/^/    /' ||
+        die "fastboot flash system failed"
+
+    if [ -n "$VBMETA" ] && [ -f "$VBMETA" ]; then
+        info "flashing vbmeta with verification disabled"
+        fb_ --disable-verity --disable-verification flash vbmeta "$VBMETA" 2>&1 |
+            tail -2 | sed 's/^/    /' || die "vbmeta flash failed"
+    else
+        note "no --vbmeta given; skipping. Without a blank vbmeta the device"
+        note "will refuse a self-built image as corrupt."
+    fi
+
+    if [ "$WIPE" = 1 ]; then
+        info "wiping userdata - required after changing the boot state"
+        fb_ erase userdata >/dev/null 2>&1 || true
+        fb_ erase metadata >/dev/null 2>&1 || true
+    fi
+
+    info "rebooting"
+    fb_ reboot >/dev/null 2>&1 || true
+fi
+
+# =================================================================== boot
+#
+# Done means the OS is running, not that a file exists.
+if runs boot; then
+    phase "boot"
+    find_tool adb ADB
+
+    # Confirm the device answers before settling in to poll. The first
+    # version of this waited forty minutes in silence because adb was not
+    # reachable at all - which is indistinguishable, from the outside, from
+    # a device that is simply slow to boot.
+    if ! adb_ devices 2>/dev/null | grep -qE 'device$|recovery$|unauthorized$'; then
+        note "no device answering adb yet - it may still be rebooting"
+    fi
+    deadline=$(( SECONDS + BOOT_TIMEOUT ))
+    last_services=0
+    stuck_since=$SECONDS
+
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        completed=$(adb_ shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+        services=$(adb_ shell service list 2>/dev/null | wc -l)
+
+        if [ "$completed" = 1 ]; then
+            info "booted - sys.boot_completed=1, $services services"
+            build=$(adb_ shell getprop ro.build.fingerprint 2>/dev/null | tr -d '\r')
+            codename=$(adb_ shell getprop ro.build.version.codename 2>/dev/null | tr -d '\r')
+            info "fingerprint: $build"
+            publish "BOOTED $(date '+%H:%M:%S') - $services services - $build"
+            case "$build" in
+                *[Cc]ircle*) popup "CircleOS is running" "$(date '+%H:%M')  $services services
+$build" ;;
+                *) alarm "BOOTED, BUT NOT CIRCLEOS" "$build"
+                   die "The device booted something that is not CircleOS:
+  $build
+  codename=$codename
+  The flash did not take, or it fell back to the other slot." ;;
+            esac
+            BOOTED=1
+            break
+        fi
+
+        # A count that climbs is progress; a count that stops for long
+        # enough is a hang, and a count that resets is system_server
+        # restarting in a loop.
+        if [ "$services" -gt "$last_services" ]; then
+            last_services=$services
+            stuck_since=$SECONDS
+        elif [ "$services" -lt "$last_services" ] && [ "$services" -gt 0 ]; then
+            note "service count fell $last_services -> $services (system_server restarting)"
+            last_services=$services
+            stuck_since=$SECONDS
+        fi
+
+        if [ $(( SECONDS - stuck_since )) -gt "$BOOT_STALL" ]; then
+            alarm "BOOT STALLED" "$services services for $(( (SECONDS - stuck_since) / 60 )) min"
+            break
+        fi
+
+        printf '  %s%s%s  %d services, %d min elapsed\n' \
+               "$DIM" "$(date '+%H:%M:%S')" "$OFF" "$services" \
+               $(( (SECONDS - (deadline - BOOT_TIMEOUT)) / 60 ))
+        publish "booting - $services services, $(( (SECONDS - (deadline - BOOT_TIMEOUT)) / 60 )) min"
+        sleep 30
+    done
+
+    if [ "${BOOTED:-0}" != 1 ]; then
+        # Get the log BEFORE anything recovers the device. Userspace
+        # fastboot runs its own kernel and overwrites the RAM buffer this
+        # lives in, so recovering the phone destroys the only explanation.
+        alarm "DID NOT BOOT" "$(date '+%Y-%m-%d %H:%M:%S')"
+        crash="$TREE/out/last_kmsg-$(date +%Y%m%d-%H%M%S).txt"
+        if adb_ get-state >/dev/null 2>&1; then
+            note "device is up enough for adb - saving the kernel log first"
+            adb_ shell dumpsys dropbox --print SYSTEM_LAST_KMSG > "$crash" 2>/dev/null || true
+            [ -s "$crash" ] && info "kernel log saved: $crash"
+        else
+            note "no adb. The kernel log is in RAM and will be destroyed by"
+            note "the userspace fastboot needed to recover the device. Read it"
+            note "first if you can: boot a known-good image, then"
+            note "  adb shell dumpsys dropbox --print SYSTEM_LAST_KMSG"
+        fi
+        publish "DID NOT BOOT $(date '+%H:%M:%S') - ${crash:-no log captured}"
+        popup "CircleOS did not boot" "$(date '+%H:%M')  See $crash"
+        die "The device did not reach sys.boot_completed within $(( BOOT_TIMEOUT / 60 )) minutes."
     fi
 fi
 

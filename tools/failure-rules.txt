@@ -1,0 +1,29 @@
+# What a build failure means, and which project fixes it.
+#
+#   <signature><TAB><project to restore>
+#
+# The signature is a fixed string looked for in the failure context of the
+# build log - not the whole log, or a successful action's name matches.
+# Lines starting with # are comments.
+#
+# os.sh reads this file. When it resolves a failure this file does not
+# cover, it appends the new rule here, so the next build - and the next
+# machine - already knows. That is the only way a list like this stays
+# useful: it has to grow by itself.
+#
+# Every line below cost at least one failed build.
+
+unrecognized module type "csuite_test"	platform/test/app_compat/csuite
+undefined module "cts_defaults"	platform/cts
+undefined module "mts-target-sdk-version-current"	platform/cts
+trusty_dirgroup_test_vts-testcase_hal	platform/test/vts-testcase/hal
+device/sample/etc/apns-full-conf.xml	device/sample
+prebuilts/jdk/jdk8/linux-x86/jre/lib	platform/prebuilts/jdk/jdk8
+metalava-gradle-plugin-deps	platform/prebuilts/gradle-plugin
+missing dependencies: lint_api	platform/prebuilts/cmdline-tools
+glide-prebuilt	platform/prebuilts/maven_repo/bumptech
+glide-gifdecoder-prebuilt	platform/prebuilts/maven_repo/bumptech
+glide-disklrucache-prebuilt	platform/prebuilts/maven_repo/bumptech
+com_android_launcher3_flags_lib	platform/packages/apps/Launcher3
+launcher-aosp-tapl	platform/packages/apps/Launcher3
+missing dependencies: cpufeatures	platform/prebuilts/ndk
