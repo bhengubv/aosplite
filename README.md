@@ -304,6 +304,39 @@ each missing dependency into a runtime `echo ... && false`, so you get one
 per build. Without it, Soong panics on the first missing fuzzer and reports
 nothing at all. Neither mode enumerates.
 
+### Before you flash
+
+A system image that boots under QEMU can still bootloop on a phone, and
+the phone will not tell you why. Its kernel log lives in RAM: it survives
+a reboot but not a power-off, and the userspace fastboot you need in order
+to restore the phone runs its own kernel and overwrites it. So you get one
+look per flash, and a flash costs a wipe.
+
+Diff against a GSI that does boot on that device instead:
+
+```bash
+tools/check-image.sh out/target/product/generic_arm64/system.img                      ~/gsi/system.img
+```
+
+Google publishes them per release -
+[developer.android.com/topic/generic-system-image/releases](https://developer.android.com/topic/generic-system-image/releases).
+
+It reads the ext4 image directly with `debugfs`, mounts nothing, needs no
+root, and takes about two minutes. What it checks:
+
+| | Why it matters |
+|---|---|
+| `codename`, `preview_sdk`, `llndk.api_level` | a pre-release image boots on Cuttlefish and bootloops on hardware - see the release-config table above |
+| `/persist`, `/firmware`, `/dsp` | a GSI ships these as symlinks into the vendor partition. Missing, the vendor cannot mount; created as real directories, also fatal |
+| `skip_mount.cfg` and the symlink that reaches it | without it init mounts `/system_ext` separately, fails, and the kernel panics with "Attempted to kill init" |
+| compatibility matrices | the device checks its FCM version against these; none old enough and it refuses the image |
+| libraries, apexes, binaries the reference has | missing HAL versions, keymint, input - each stops the boot somewhere with no message |
+
+Run against the image that actually failed on a Pixel 7a, it reported the
+pre-release stamp, three missing mount points, two missing matrices and 39
+missing libraries - all of which had previously been found one flash cycle
+at a time.
+
 ### A pruned tree needs ALLOW_MISSING_DEPENDENCIES
 
 Even with those four restored, Soong panics rather than skipping modules
