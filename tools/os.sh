@@ -57,6 +57,7 @@ WIPE=1                     # required after changing the boot state
 SERIAL=""                  # adb/fastboot serial, if more than one device
 BOOT_TIMEOUT=2400          # 40 min; a first boot on a wiped device is slow
 BOOT_STALL=900             # 15 min with no new service = hung
+FACTORY=""                 # unzipped factory image, for rescuing the log
 
 usage() {
     sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
@@ -79,6 +80,10 @@ Options
   --serial S             adb/fastboot serial, if more than one device
   --no-wipe              skip erasing userdata (it will usually not boot)
   --boot-timeout SECS    default 2400
+  --factory-image DIR    unzipped factory image. If the device fails to
+                         boot, os.sh restores from this and reads the
+                         kernel log automatically - the log is perishable
+                         and deciding what to do costs it
   --retries N            default 8
   --report-every SECS    progress line during a build, default 1200 (20 min)
   --no-auto-fix          stop on the first failure instead of fixing it.
@@ -118,6 +123,7 @@ while [ $# -gt 0 ]; do
         --serial) SERIAL="$2"; shift ;;
         --no-wipe) WIPE=0 ;;
         --boot-timeout) BOOT_TIMEOUT="$2"; shift ;;
+        --factory-image) FACTORY="$2"; shift ;;
         -h|--help) usage 0 ;;
         *) echo "unknown option: $1" >&2; usage 1 ;;
     esac
@@ -787,7 +793,49 @@ if runs boot; then
     last_services=0
     stuck_since=$SECONDS
 
+    find_tool fastboot FASTBOOT
     while [ "$SECONDS" -lt "$deadline" ]; do
+        # A device that gives up on a slot drops back into BOOTLOADER
+        # fastboot. Polling adb will never notice - it looks exactly like a
+        # slow boot, and the wait runs the clock out. Check every pass.
+        if fb_ devices 2>/dev/null | grep -q fastboot; then
+            alarm "DID NOT BOOT - FELL BACK TO FASTBOOT" "$(date '+%Y-%m-%d %H:%M:%S')"
+            publish "DID NOT BOOT $(date '+%H:%M:%S') - device sitting in fastboot"
+            cat >&2 <<'FELLBACK'
+  The bootloader tried the slot, failed, and dropped to fastboot.
+
+  The reason is in the kernel's RAM console right now, and it is fragile:
+
+    - it survives a reboot, NOT a power-off. Do not hold the power button.
+    - reading it needs a booted Android.
+    - userspace fastboot boots a recovery kernel and overwrites it, so
+      recovering the device the usual way destroys it first.
+
+  Get it in one piece:
+
+      tools/rescue-log.sh <unzipped-factory-image-dir>
+
+FELLBACK
+            # Do it rather than advise it. The log is perishable and every
+            # minute spent deciding is a minute it can be lost - a power
+            # button pressed to "reset" a stuck USB port erases it.
+            if [ -n "$FACTORY" ] && [ -d "$FACTORY" ] &&
+               [ -f "$SELF/tools/rescue-log.sh" ]; then
+                info "rescuing the kernel log before recovering the device"
+                set +e
+                OUT="$TREE/out/last_kmsg-$(date +%Y%m%d-%H%M%S).txt" \
+                    bash "$SELF/tools/rescue-log.sh" "$FACTORY" "$SERIAL"
+                rc=$?
+                set -e
+                [ "$rc" = 0 ] && publish "log rescued after failed boot $(date '+%H:%M:%S')"
+            else
+                note "no --factory-image given, so the log cannot be rescued"
+                note "automatically. Do it by hand before recovering:"
+                note "    tools/rescue-log.sh <unzipped-factory-image-dir>"
+            fi
+            die "Device did not boot."
+        fi
+
         completed=$(adb_ shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
         services=$(adb_ shell service list 2>/dev/null | wc -l)
 
