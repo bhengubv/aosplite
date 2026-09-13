@@ -51,7 +51,6 @@ AUTO_FIX=1                 # close the loop by default: fix, learn, rebuild
 REPORT_EVERY=1200          # seconds between progress lines during a build
 STATUS_DIR=""              # where to publish status; auto-detected on WSL
 RULES=""                   # tools/failure-rules.txt; set once SELF is known
-POPUPS=1                   # desktop notification on failure and completion
 PHASES="doctor sync check build verify flash boot"
 VBMETA=""                  # blank vbmeta to flash with verification off
 WIPE=1                     # required after changing the boot state
@@ -79,7 +78,6 @@ Options
                          Without it a device refuses a self-built image
   --serial S             adb/fastboot serial, if more than one device
   --no-wipe              skip erasing userdata (it will usually not boot)
-  --no-popups            no desktop notification; STATUS.txt still written
   --boot-timeout SECS    default 2400
   --retries N            default 8
   --report-every SECS    progress line during a build, default 1200 (20 min)
@@ -115,7 +113,6 @@ while [ $# -gt 0 ]; do
         --report-every) REPORT_EVERY="$2"; shift ;;
         --auto-fix) AUTO_FIX=1 ;;
         --no-auto-fix) AUTO_FIX=0 ;;
-        --no-popups) POPUPS=0 ;;
         --status-dir) STATUS_DIR="$2"; shift ;;
         --vbmeta) VBMETA="$2"; shift ;;
         --serial) SERIAL="$2"; shift ;;
@@ -146,15 +143,14 @@ info()  { printf '  %s\n' "$1"; }
 note()  { printf '  %s%s%s\n' "$DIM" "$1" "$OFF"; }
 die() {
     # Every failure leaves the same trace, wherever it happens: a banner in
-    # the terminal, a line in STATUS.txt on the Windows side, and a dialog
-    # on the desktop. A phase that fails quietly is how hours get lost - a
+    # the terminal and a line in STATUS.txt on the Windows side. A phase
+    # that fails quietly is how hours get lost - a
     # build died here at 00:58 and was found at 05:47.
     local msg="$1" code="${2:-1}" first
     first=$(printf '%s' "$msg" | head -1 | cut -c1-120)
     alarm "FAILED in ${PHASE_NAME:-os.sh}" "$(date '+%Y-%m-%d %H:%M:%S')"
     printf '  %s\n' "$msg" >&2
     publish "FAILED ${PHASE_NAME:-os.sh} $(date '+%H:%M:%S') - $first"
-    popup "AOSP build FAILED" "$(date '+%H:%M')  ${PHASE_NAME:-os.sh}: $first"
     exit "$code"
 }
 
@@ -206,8 +202,15 @@ find_tool() {
 # ------------------------------------------------------------ publishing
 #
 # A report that only exists in a log nobody is tailing is not a report.
-# Under WSL the Windows side of the machine is the place a person actually
-# looks, so status is written there and a failure raises a dialog box.
+# Under WSL the Windows side of the machine is where a person actually
+# looks, so status is written there as plain text:
+#
+#   %USERPROFILE%osp-build\STATUS.txt    one line, the current state
+#   %USERPROFILE%osp-build\history.log   every line, timestamped
+#
+# Text only, deliberately. A dialog box means a resident process holding
+# ~100 MB until somebody clicks it, and the whole premise is that nobody
+# is watching.
 if [ -z "$STATUS_DIR" ] && command -v wslpath >/dev/null 2>&1 &&
    command -v cmd.exe >/dev/null 2>&1; then
     # Ask Windows where the profile is and let wslpath convert it. Globbing
@@ -235,24 +238,6 @@ publish() {
     echo "$(date '+%Y-%m-%d %H:%M:%S')  $1" >> "$STATUS_DIR/history.log" 2>/dev/null || true
 }
 
-popup() {
-    # Notify without leaving a process resident.
-    #
-    # This used to raise a WPF MessageBox. That loads PresentationFramework
-    # - about 100 MB - and blocks until someone clicks it, so an unattended
-    # failure at 3am left PowerShell holding that memory until morning. On
-    # a machine where soong_build wants 22 GB, that is not free.
-    #
-    # msg.exe is a few MB, prints to the desktop and exits immediately. If
-    # it is unavailable the status file and the terminal bell still carry
-    # the message, so nothing is lost by skipping it.
-    [ "$POPUPS" = 1 ] || return 0
-    command -v msg.exe >/dev/null 2>&1 || return 0
-    local text
-    text=$(printf '%s: %s' "$1" "$2" | tr -d "'\"" | cut -c1-250)
-    msg.exe "$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '
-')"         /TIME:600 "$text" >/dev/null 2>&1 || true
-}
 
 
 # Loud on purpose. A failure buried in a scrolling log is how a build that
@@ -594,7 +579,6 @@ if runs build; then
         first_err=$(grep -m1 -E '^(error|FAILED):|missing dependencies|unrecognized module type|no known rule' \
                     "$LOG" 2>/dev/null | cut -c1-140)
         publish "FAILED $(date '+%H:%M:%S') - ${first_err:-see $LOG}"
-        popup "AOSP build FAILED" "$(date '+%H:%M') attempt $attempt. ${first_err:-see log}"
 
         # Diagnose either way - the answer is useful whether or not we
         # are allowed to act on it.
@@ -800,8 +784,8 @@ if runs boot; then
             info "fingerprint: $build"
             publish "BOOTED $(date '+%H:%M:%S') - $services services - $build"
             case "$build" in
-                *[Cc]ircle*) popup "CircleOS is running" "$(date '+%H:%M')  $services services
-$build" ;;
+                *[Cc]ircle*)
+                   alarm "CIRCLEOS IS RUNNING" "$services services, $(date '+%H:%M:%S')" ;;
                 *) alarm "BOOTED, BUT NOT CIRCLEOS" "$build"
                    die "The device booted something that is not CircleOS:
   $build
@@ -853,13 +837,11 @@ $build" ;;
             note "  adb shell dumpsys dropbox --print SYSTEM_LAST_KMSG"
         fi
         publish "DID NOT BOOT $(date '+%H:%M:%S') - ${crash:-no log captured}"
-        popup "CircleOS did not boot" "$(date '+%H:%M')  See $crash"
         die "The device did not reach sys.boot_completed within $(( BOOT_TIMEOUT / 60 )) minutes."
     fi
 fi
 
 phase "done"
 publish "DONE at $(date '+%H:%M:%S') - ${img:-image under $TREE/out/target/product/}"
-popup "AOSP build finished" "$(date '+%H:%M')  ${img:-see $TREE/out/target/product/}"
 info "image: ${img:-see $TREE/out/target/product/}"
 [ -n "$REFERENCE" ] || note "pass --reference <gsi system.img> to check it against a GSI that boots"
