@@ -45,6 +45,7 @@ JOBS="$(nproc)"
 MAX_RETRIES=8
 AUTO_FIX=0                 # opt in; a failure stops the build by default
 REPORT_EVERY=1200          # seconds between progress lines during a build
+STATUS_DIR=""              # where to publish status; auto-detected on WSL
 PHASES="doctor sync check build verify"
 
 usage() {
@@ -93,6 +94,7 @@ while [ $# -gt 0 ]; do
         --retries) MAX_RETRIES="$2"; shift ;;
         --report-every) REPORT_EVERY="$2"; shift ;;
         --auto-fix) AUTO_FIX=1 ;;
+        --status-dir) STATUS_DIR="$2"; shift ;;
         -h|--help) usage 0 ;;
         *) echo "unknown option: $1" >&2; usage 1 ;;
     esac
@@ -113,6 +115,50 @@ note()  { printf '  %s%s%s\n' "$DIM" "$1" "$OFF"; }
 die()   { printf '\n  %s\n' "$1" >&2; exit "${2:-1}"; }
 
 runs() { case " $PHASES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+# ------------------------------------------------------------ publishing
+#
+# A report that only exists in a log nobody is tailing is not a report.
+# Under WSL the Windows side of the machine is the place a person actually
+# looks, so status is written there and a failure raises a dialog box.
+if [ -z "$STATUS_DIR" ] && command -v wslpath >/dev/null 2>&1 &&
+   command -v cmd.exe >/dev/null 2>&1; then
+    # Ask Windows where the profile is and let wslpath convert it. Globbing
+    # /mnt/c/Users/*/ picks up "All Users", "Default" and "Public" -
+    # junctions, one of which contains a space, and every path built from it
+    # then breaks.
+    win=$(cd /mnt/c 2>/dev/null && cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null |
+          tr -d '\r\n')
+    if [ -n "$win" ]; then
+        cand=$(wslpath -u "$win" 2>/dev/null || true)
+        if [ -n "$cand" ] && [ -d "$cand" ] && [ -w "$cand" ]; then
+            STATUS_DIR="$cand/aosp-build"
+        fi
+    fi
+fi
+if [ -n "$STATUS_DIR" ]; then
+    mkdir -p "$STATUS_DIR" 2>/dev/null || STATUS_DIR=""
+fi
+
+publish() {
+    # $1 = one-line status. STATUS.txt is overwritten so it always shows the
+    # current state at a glance; history.log keeps every line.
+    [ -n "$STATUS_DIR" ] || return 0
+    echo "$1" > "$STATUS_DIR/STATUS.txt" 2>/dev/null || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S')  $1" >> "$STATUS_DIR/history.log" 2>/dev/null || true
+}
+
+popup() {
+    # A dialog on the Windows desktop. Failure and completion only -
+    # anything more frequent gets dismissed without being read.
+    command -v powershell.exe >/dev/null 2>&1 || return 0
+    local title body
+    title=$(printf '%s' "$1" | tr -d "'")
+    body=$(printf '%s' "$2" | tr -d "'")
+    powershell.exe -NoProfile -Command \
+        "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('$body','$title') | Out-Null" \
+        >/dev/null 2>&1 &
+}
 
 # Loud on purpose. A failure buried in a scrolling log is how a build that
 # died at 00:58 went unnoticed until 05:47. Prints a banner and rings the
@@ -401,6 +447,7 @@ if runs build; then
 
             printf '  %s%s%s  %s]  %s  %s\n' \
                    "$DIM" "$(date '+%H:%M:%S')" "$OFF" "$progress" "$eta" "$mem"
+            publish "building  $progress]  $eta  $mem"
         done
 
         wait "$build_pid"
@@ -409,12 +456,20 @@ if runs build; then
 
         if [ "$rc" = 0 ]; then
             info "build succeeded on attempt $attempt"
+            publish "build SUCCEEDED at $(date '+%H:%M:%S') after $attempt attempt(s)"
             break
         fi
 
-        note "failed - $(grep -cE '^(error|FAILED):' "$LOG" 2>/dev/null || echo 0) error line(s)"
+        alarm "BUILD FAILED" "attempt $attempt of $MAX_RETRIES, $(date '+%H:%M:%S')"
         grep -E '^(error|FAILED):|missing dependencies|unrecognized module type|no known rule' "$LOG" \
-            | head -3 | sed 's/^/    /'
+            | head -6 | sed 's/^/    /'
+        echo
+        info "full log: $LOG"
+
+        first_err=$(grep -m1 -E '^(error|FAILED):|missing dependencies|unrecognized module type|no known rule' \
+                    "$LOG" 2>/dev/null | cut -c1-140)
+        publish "FAILED $(date '+%H:%M:%S') - ${first_err:-see $LOG}"
+        popup "AOSP build FAILED" "$(date '+%H:%M') attempt $attempt. ${first_err:-see log}"
 
         # Diagnose either way - the answer is useful whether or not we
         # are allowed to act on it.
@@ -492,5 +547,7 @@ if runs verify; then
 fi
 
 phase "done"
+publish "DONE at $(date '+%H:%M:%S') - ${img:-image under $TREE/out/target/product/}"
+popup "AOSP build finished" "$(date '+%H:%M')  ${img:-see $TREE/out/target/product/}"
 info "image: ${img:-see $TREE/out/target/product/}"
 [ -n "$REFERENCE" ] || note "pass --reference <gsi system.img> to check it against a GSI that boots"
