@@ -274,5 +274,11 @@ print()
 print("Some entries will be false positives: modules provided through a")
 print("Soong namespace, or names assembled at build time. Check before")
 print("un-pruning.")
-sys.exit(1)
+
+# Only the blocking set decides the exit code. Advisory findings - a single
+# reference, or references only from test directories - are printed because
+# they are worth reading, not because they should stop a build. Exiting 1
+# on those made the checks fail on a tree where the blocking count was
+# zero, which teaches people to ignore the check.
+sys.exit(1 if likely else 0)
 PY
