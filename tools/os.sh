@@ -109,10 +109,27 @@ LOG="$TREE/out/os-sh.log"
 # ------------------------------------------------------------------ output
 BOLD=""; DIM=""; OFF=""
 [ -t 1 ] && { BOLD=$'\033[1m'; DIM=$'\033[2m'; OFF=$'\033[0m'; }
-phase() { printf '\n%s=== %s %s%s\n' "$BOLD" "$1" "$(date +%H:%M:%S)" "$OFF"; }
+PHASE_NAME=""
+phase() {
+    PHASE_NAME="$1"
+    printf '\n%s=== %s %s%s\n' "$BOLD" "$1" "$(date +%H:%M:%S)" "$OFF"
+    publish "$1 started $(date '+%H:%M:%S')"
+}
 info()  { printf '  %s\n' "$1"; }
 note()  { printf '  %s%s%s\n' "$DIM" "$1" "$OFF"; }
-die()   { printf '\n  %s\n' "$1" >&2; exit "${2:-1}"; }
+die() {
+    # Every failure leaves the same trace, wherever it happens: a banner in
+    # the terminal, a line in STATUS.txt on the Windows side, and a dialog
+    # on the desktop. A phase that fails quietly is how hours get lost - a
+    # build died here at 00:58 and was found at 05:47.
+    local msg="$1" code="${2:-1}" first
+    first=$(printf '%s' "$msg" | head -1 | cut -c1-120)
+    alarm "FAILED in ${PHASE_NAME:-os.sh}" "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf '  %s\n' "$msg" >&2
+    publish "FAILED ${PHASE_NAME:-os.sh} $(date '+%H:%M:%S') - $first"
+    popup "AOSP build FAILED" "$(date '+%H:%M')  ${PHASE_NAME:-os.sh}: $first"
+    exit "$code"
+}
 
 runs() { case " $PHASES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
@@ -268,8 +285,13 @@ if runs check && [ "$MODE" = lite ]; then
         esac
     done
     if [ "$blocked" = 1 ]; then
-        note "these are handled by the build retry loop where they are"
-        note "recognised; anything left after $MAX_RETRIES attempts needs a human"
+        # These are real. Both checks report zero blocking findings on a
+        # correctly pruned tree, so anything here will fail the build -
+        # some during analysis, some only when the module is reached hours
+        # in. Carrying on and hoping is what this script exists to stop.
+        die "The checks found references to projects this tree no longer has.
+  Each one fails the build. The fix for each is printed above it.
+  Re-run with --auto-fix to have recognised ones restored automatically."
     fi
 fi
 
