@@ -87,6 +87,10 @@ for root, dirs, files in os.walk(tree):
     for fn in files:
         if fn != "Android.bp" and not fn.endswith(".bp"):
             continue
+        # A file called unused_Android.bp is not in any build. Soong does
+        # not read it, and the modules it names cannot break anything.
+        if fn.startswith("unused_"):
+            continue
         fp = os.path.join(root, fn)
         scanned += 1
         try:
@@ -94,6 +98,26 @@ for root, dirs, files in os.walk(tree):
         except OSError:
             continue
         rel = os.path.relpath(fp, tree)
+
+        # Remove // comments, but only real ones. "//visibility:public" and
+        # "//frameworks/base:__subpackages__" are quoted values, not
+        # comments, and stripping those shreds the file. A // is a comment
+        # when the quotes before it on that line are balanced.
+        #
+        # Without this the property regex - which spans newlines - swallows
+        # comment text sitting inside a list, and every quoted word in it
+        # is reported as a missing module. That is where "above" came from:
+        #     // DO NOT add libutils or anything "above" libcutils
+        clean = []
+        for line in text.splitlines():
+            i = line.find("//")
+            while i != -1:
+                if line[:i].count('"') % 2 == 0:
+                    line = line[:i]
+                    break
+                i = line.find("//", i + 2)
+            clean.append(line)
+        text = chr(10).join(clean)
 
         for m in DEF.finditer(text):
             defined.add(m.group(1))
@@ -148,6 +172,8 @@ IGNORE = re.compile(
     r'^sdk_(module-lib|public|system|test)_|'       # SDK snapshot names
     r'\.(vendor_ramdisk|recovery|ramdisk|vendor|product)$|'  # image variants
     r'^libwifi-hal-|'                               # board-selected wifi HALs
+    r'^libcom\.android\.sysprop\.|'                # sysprop_library, generated
+    r'_properties$|'                                # sysprop_library, generated
 
     r'^lib[A-Z].*Properties$|'
     r'(^|[.-])(current|latest)$'

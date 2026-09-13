@@ -27,16 +27,57 @@
 set -eo pipefail
 
 TREE="${1:-$HOME/android}"
+PRODUCT="${2:-}"          # optional: only block on makefiles this product reads
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 [ -d "$TREE" ] || { echo "no tree at $TREE" >&2; exit 1; }
 [ -d "$SELF/manifests" ] || { echo "no manifests at $SELF/manifests" >&2; exit 1; }
 
-python3 - "$TREE" "$SELF" <<'PY'
+python3 - "$TREE" "$SELF" "$PRODUCT" <<'PY'
 import os, re, sys, glob, collections
 import xml.etree.ElementTree as ET
 
 tree, self_dir = sys.argv[1], sys.argv[2]
+product = sys.argv[3] if len(sys.argv) > 3 else ""
+
+# Which makefiles does this product actually read?
+#
+# Without this, every device/google_car/*.mk that includes another phone's
+# device tree is reported as blocking - true if you were building that car
+# product, meaningless if you are building a GSI. Walking the inherit chain
+# is the difference between a check you act on and a check you learn to
+# ignore.
+product_closure = set()
+if product:
+    import subprocess
+    start = subprocess.run(
+        ["grep", "-rlE", r"PRODUCT_NAME[[:space:]]*:=[[:space:]]*%s([[:space:]]|$)" % product,
+         os.path.join(tree, "device"), os.path.join(tree, "build"),
+         os.path.join(tree, "vendor"), "--include=*.mk"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout.split()
+    queue = list(start)
+    INC = re.compile(r'(?:inherit-product(?:-if-exists)?\s*,\s*|^\s*-?include\s+)([^\s)]+)', re.M)
+    while queue:
+        f = queue.pop()
+        rf = os.path.relpath(f, tree)
+        if rf in product_closure:
+            continue
+        product_closure.add(rf)
+        try:
+            body = open(f, encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        for m in INC.finditer(body):
+            ref = (m.group(1)
+                   .replace("$(SRC_TARGET_DIR)", "build/make/target")
+                   .replace("$(LOCAL_PATH)", os.path.dirname(rf))
+                   .replace("$(TOPDIR)", ""))
+            if "$" in ref:
+                continue          # a variable we cannot resolve; skip it
+            cand = os.path.join(tree, ref)
+            if os.path.isfile(cand):
+                queue.append(cand)
+
 
 # Paths a human has looked at and ruled out. See the file's own header.
 allow = set()
@@ -112,6 +153,7 @@ FILE_DEP = re.compile(
 blocking = collections.defaultdict(set)   # path -> referencing .bp files
 filedep = collections.defaultdict(set)    # path -> .mk files that open it
 advisory = collections.defaultdict(set)   # path -> .mk files that only name it
+other    = collections.defaultdict(set)   # real dep, but another product's makefile
 
 skip_dirs = {".repo", ".git", "out"}
 scanned = 0
@@ -156,8 +198,15 @@ for root, dirs, files in os.walk(tree):
             line_start = text.rfind("\n", 0, m.start()) + 1
             line_end = text.find("\n", m.end())
             line = text[line_start:line_end if line_end != -1 else len(text)]
-            (filedep if FILE_DEP.search(line) else advisory)[hit].add(
-                "%s: %s" % (rel, line.strip()[:100]))
+            if not FILE_DEP.search(line):
+                advisory[hit].add("%s: %s" % (rel, line.strip()[:100]))
+            elif product_closure and rel not in product_closure:
+                # A real file dependency, but in a makefile this product
+                # never reads - another device's tree. Worth knowing, not
+                # worth blocking.
+                other[hit].add("%s: %s" % (rel, line.strip()[:100]))
+            else:
+                filedep[hit].add("%s: %s" % (rel, line.strip()[:100]))
 
 print("scanned   : %d build files" % scanned)
 print()
@@ -209,6 +258,14 @@ if filedep:
         print("           <remove-project name=\"%s\" optional=\"true\"/>" % name)
         print("           repo sync -c -j$(nproc) --no-clone-bundle %s" % name)
         print()
+
+if other:
+    print("Another product's makefiles open these. Real dependencies, but not")
+    print("in %s's inherit chain (%d makefiles), so they cannot affect this" % (product or "this product", len(product_closure)))
+    print("build:")
+    for path in sorted(other, key=lambda p: -len(other[p]))[:10]:
+        print("  %-44s %d file(s)" % (path, len(other[path])))
+    print()
 
 if advisory:
     print("ADVISORY - the path is only named in a variable, never opened.")

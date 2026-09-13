@@ -43,6 +43,7 @@ TARGET="systemimage"
 REFERENCE=""                   # GSI to verify against
 JOBS="$(nproc)"
 MAX_RETRIES=8
+AUTO_FIX=0                 # opt in; a failure stops the build by default
 REPORT_EVERY=1200          # seconds between progress lines during a build
 PHASES="doctor sync check build verify"
 
@@ -63,6 +64,10 @@ Options
   --phases "a b c"       run only these: doctor sync check build verify
   --retries N            default 8
   --report-every SECS    progress line during a build, default 1200 (20 min)
+  --auto-fix             on a recognised failure, restore the project and
+                         retry. Off by default: a failure stops the build
+                         and says what it is, because a retry loop that
+                         guesses wrong is worse than one that stops
 
 Exit codes
   0  image built (and verified, if a reference was given)
@@ -87,6 +92,7 @@ while [ $# -gt 0 ]; do
         --phases) PHASES="$2"; shift ;;
         --retries) MAX_RETRIES="$2"; shift ;;
         --report-every) REPORT_EVERY="$2"; shift ;;
+        --auto-fix) AUTO_FIX=1 ;;
         -h|--help) usage 0 ;;
         *) echo "unknown option: $1" >&2; usage 1 ;;
     esac
@@ -107,6 +113,18 @@ note()  { printf '  %s%s%s\n' "$DIM" "$1" "$OFF"; }
 die()   { printf '\n  %s\n' "$1" >&2; exit "${2:-1}"; }
 
 runs() { case " $PHASES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+# Loud on purpose. A failure buried in a scrolling log is how a build that
+# died at 00:58 went unnoticed until 05:47. Prints a banner and rings the
+# terminal bell, so it is visible in a window nobody is watching.
+RED=""; [ -t 1 ] && RED=$'\033[1;31m'
+alarm() {
+    printf '\n%s############################################################%s\n' "$RED" "$OFF"
+    printf '%s##  %-54s##%s\n' "$RED" "$1" "$OFF"
+    [ -n "${2:-}" ] && printf '%s##  %-54s##%s\n' "$RED" "$2" "$OFF"
+    printf '%s############################################################%s\n\n' "$RED" "$OFF"
+    printf '\a'
+}
 
 # ------------------------------------------------------------- environment
 # Set here so every phase agrees, and so the reasons travel with them.
@@ -189,7 +207,13 @@ if runs check && [ "$MODE" = lite ]; then
         [ -f "$s" ] || die "tools/$c.sh missing - refusing to build unchecked" 2
         info "$c.sh"
         set +e
-        out=$(bash "$s" "$TREE" 2>&1); rc=$?
+        # preflight takes the product so it can tell a makefile this
+        # build reads from another device's.
+        if [ "$c" = preflight ]; then
+            out=$(bash "$s" "$TREE" "$PRODUCT" 2>&1); rc=$?
+        else
+            out=$(bash "$s" "$TREE" 2>&1); rc=$?
+        fi
         set -e
         case "$rc" in
             0) note "  clean" ;;
@@ -212,7 +236,17 @@ fi
 #   signature                             provided by
 fix_for_signature() {
     local log="$1"
-    local s
+    local s errs
+
+    # Only look at failure context. Scanning the whole log matches
+    # successful work: a line like
+    #   [3% 4703/154564] //prebuilts/gradle-plugin:metalava-gradle-plugin-deps
+    # names a module that built fine, and matching on it restored a project
+    # that was never missing while the real failure went unread.
+    errs=$(mktemp)
+    grep -A3 -E "^FAILED:|^error:|^ninja: error" "$log" > "$errs" 2>/dev/null || true
+    grep -E "missing dependencies|unrecognized module type|no known rule to make"         "$log" >> "$errs" 2>/dev/null || true
+    log="$errs"
 
     # A missing Soong module type. Fails during analysis, so it is cheap
     # to hit but stops everything.
@@ -247,6 +281,12 @@ fix_for_signature() {
     if grep -qE 'missing dependencies:.*glide-(prebuilt|gifdecoder|disklrucache)' "$log"; then
         echo "platform/prebuilts/maven_repo/bumptech"; return 0; fi
 
+    # Launcher3 provides an aconfig flags library that frameworks/base
+    # links against - services/core and the WindowManager Shell both do -
+    # so pruning the launcher breaks the framework, not just the launcher.
+    if grep -q 'com_android_launcher3_flags_lib' "$log"; then
+        echo "platform/packages/apps/Launcher3"; return 0; fi
+
     # Generic fallback: Soong names the module, and for a great many of
     # them the project is the module's own directory. Only used when
     # nothing above matched.
@@ -265,7 +305,17 @@ unprune() {
     local project="$1" reason="$2" found=0
     for f in "$TREE"/.repo/local_manifests/*.xml; do
         [ -e "$f" ] || continue
-        grep -q "name=\"$project\"" "$f" || continue
+        # Must be an ACTIVE entry. Disabled ones are kept inside XML
+        # comments with their reason, and a grep finds those too - which
+        # made this report "could not find a remove-project entry" for a
+        # project that was already restored.
+        python3 - "$f" "$project" <<'ACTIVE' || continue
+import sys, xml.etree.ElementTree as ET
+tree, name = sys.argv[1], sys.argv[2]
+found = any(e.get("name") == name
+            for e in ET.parse(tree).getroot().findall("remove-project"))
+sys.exit(0 if found else 1)
+ACTIVE
         python3 - "$f" "$project" "$reason" <<'PY'
 import sys
 path, project, reason = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -366,6 +416,30 @@ if runs build; then
         grep -E '^(error|FAILED):|missing dependencies|unrecognized module type|no known rule' "$LOG" \
             | head -3 | sed 's/^/    /'
 
+        # Diagnose either way - the answer is useful whether or not we
+        # are allowed to act on it.
+        set +e
+        project=$(fix_for_signature "$LOG"); has_fix=$?
+        set -e
+
+        if [ "$AUTO_FIX" != 1 ]; then
+            echo
+            case "$has_fix:$project" in
+                0:UNKNOWN:*)
+                    info "diagnosis: module '${project#UNKNOWN:}' is referenced but not"
+                    info "           in this tree, and no rule says which project provides it." ;;
+                0:*)
+                    info "diagnosis: $project was pruned and the build needs it."
+                    info "fix:       comment its remove-project entry out, keep the line,"
+                    info "           write down why, then"
+                    info "           cd $TREE && repo sync -c -j$JOBS --no-clone-bundle $project"
+                    info "           then run this again." ;;
+                *)
+                    info "diagnosis: no rule matches this failure. Read the log." ;;
+            esac
+            die "Stopped. Re-run with --auto-fix to let it restore and retry by itself."
+        fi
+
         if [ "$attempt" -ge "$MAX_RETRIES" ]; then
             die "gave up after $MAX_RETRIES attempts. Log: $LOG"
         fi
@@ -375,9 +449,6 @@ if runs build; then
   Log: $LOG"
         fi
 
-        set +e
-        project=$(fix_for_signature "$LOG"); has_fix=$?
-        set -e
         [ "$has_fix" = 0 ] || die "no known fix for this failure. Log: $LOG"
 
         case "$project" in

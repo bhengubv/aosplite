@@ -19,3 +19,17 @@ libartbase#impl
 libartbased#impl
 libdexfile#static
 libartpalette#impl
+
+# Guarded by product_variables: { arc: { ... } } in
+# frameworks/native/cmds/installd/Android.bp. Only built when a product
+# sets arc:true - Chrome OS's App Runtime for Android. Not a missing
+# project.
+arc_services_aidl
+libarcdiskquota
+
+# Referenced only from tools/tradefederation, test/catbox and art/test -
+# all test-side, and pruned themselves. Pruned referencing pruned.
+loganalysis
+
+# Not a module. It appears as an apex_available / package value.
+unbundled_google.app
