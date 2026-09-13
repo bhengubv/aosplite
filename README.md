@@ -19,7 +19,7 @@ No promises. Use it, or don't.
 |---|---|
 | `manifests/` | Five prune tiers, plus one opt-in extra |
 | `products/` | Three optional `lunch` targets: generic, watch, desktop |
-| `tools/` | Init, verification, per-release maintenance |
+| `tools/` | Init, the four checks, build wrapper, per-release maintenance |
 | `docs/RATIONALE.md` | What was cut and why |
 | `docs/EMULATOR.md` | Running what you built, on Cuttlefish or raw QEMU |
 | `SETUP.md` | Building AOSP from nothing, if you have not before |
@@ -51,12 +51,26 @@ cd ~/android
 repo sync -c -j$(nproc) --no-clone-bundle --prune
 ```
 
-Any release tag works - see *Branch portability*. Then check the pruned
-tree before committing hours to a build:
+Any release tag works - see *Branch portability*.
+
+Then build. `build.sh` runs the checks first and refuses to start if any
+of them fails - there is no flag to skip that:
 
 ```
-aosplite/tools/preflight.sh ~/android
-aosplite/tools/check-modules.sh ~/android
+cp -r aosplite/products device/aosplite
+aosplite/tools/build.sh lite_arm64-bp4a-userdebug systemimage
+```
+
+| Check | Finds |
+|---|---|
+| `check-env.sh` | malformed manifests, a staging release config, a make target that builds nothing, too little swap for a 22 GB `soong_build`, `USE_CCACHE` changed under an existing `out/`, unwritable cache dirs, a machine that will suspend mid-build |
+| `preflight.sh` | build files naming paths inside pruned projects |
+| `check-modules.sh` | module names nothing in the tree defines |
+
+and after the build, before you put it on hardware:
+
+```
+aosplite/tools/check-image.sh out/target/product/*/system.img ~/gsi/system.img
 ```
 
 Half the saving is the shallow init and needs no manifest at all:
@@ -66,17 +80,11 @@ repo init -u https://android.googlesource.com/platform/manifest \
   -b android-15.0.0_r20 --depth=1 --no-tags
 ```
 
-Then, if you want the trimmed target:
-
-```
-cp -r aosplite/products device/aosplite
-aosplite/tools/build.sh lite_arm64-bp4a-userdebug systemimage
-```
-
-`build.sh` sets the environment a pruned tree needs - including
+`build.sh` also sets the environment a pruned tree needs - including
 `ALLOW_MISSING_DEPENDENCIES`, without which Soong panics - and leaves
 `USE_CCACHE` alone. You can do it by hand with `source build/envsetup.sh`
-and `lunch`, but then the environment is yours to get right every time.
+and `lunch`, but then the environment is yours to get right every time,
+and the checks do not run.
 
 The other two targets are `watch_arm64` and `desktop_x86_64`. The
 destination path `device/aosplite` matters - `watch_arm64.mk` copies a
