@@ -275,6 +275,129 @@ else
     ok "all $nxml resource XML files parse"
 fi
 
+# ============================ 5. the same resource defined twice in one module
+#
+# aapt2 refuses a module where two values files define the same resource name
+# for the same configuration:
+#
+#   colors_mode_creator.xml:4: error: resource 'color/circle_accent' has a
+#     conflicting value for configuration ().
+#   colors.xml:11: note: originally defined here.
+#   error: failed parsing input.
+#
+# It is detectable by reading the files, and it is NOT detected by anything
+# else here: the XML is well-formed, the names are legitimate, each file is
+# fine on its own. Only the combination is wrong.
+#
+# It cost 22 minutes on 2026-09-15 - the whole framework compiled first,
+# because aapt2 link for one overlay runs late. That is the shape of the
+# problem: cheap to find, expensive to hit.
+#
+# This usually means the files are ALTERNATIVES - eight per-mode colour sets,
+# one meant to be active at a time. Alternatives cannot live in one APK; they
+# belong in separate overlay packages sharing an android:category, so the
+# OverlayManager enables exactly one. The check says so rather than just
+# reporting a duplicate, because "duplicate" invites deleting one.
+dup_out=$(python3 - "$TREE" <<'PY'
+import os, re, sys, collections
+import xml.etree.ElementTree as ET
+
+tree = sys.argv[1]
+
+# A resource is defined by a DIRECT CHILD of <resources>. Anything deeper is
+# not a resource: <item name="android:background"> inside a <style> is a style
+# attribute, and matching those reported AOSP's own Car RRO - which builds
+# perfectly - as broken. Parse the XML and look only at depth 1.
+#
+# <item> at depth 1 IS a resource (it carries type=), so it is kept, keyed by
+# its type attribute.
+def defs(path):
+    try:
+        root = ET.parse(path).getroot()
+    except Exception:
+        return
+    if root.tag != "resources":
+        return
+    for child in root:
+        if not isinstance(child.tag, str):
+            continue                      # comment or PI
+        name = child.get("name")
+        if not name:
+            continue
+        kind = child.get("type") if child.tag == "item" else child.tag
+        if not kind:
+            continue
+        # declare/attr are declarations, not values; two files may declare the
+        # same attr without conflict.
+        if kind in ("declare-styleable", "attr", "eat-comment", "skip"):
+            continue
+        # A flagged resource is SUPPOSED to appear more than once - one
+        # definition per flag state, aapt2 picks by the flag at build time.
+        # frameworks/base/tools/aapt2/integration-tests/FlaggedResourcesTest
+        # is exactly that, and reporting it made this check wrong about a
+        # module whose whole purpose is to be built.
+        if child.get("{http://schemas.android.com/apk/res/android}featureFlag") \
+           or child.get("android:featureFlag"):
+            continue
+        yield kind, name
+
+mods = collections.defaultdict(lambda: collections.defaultdict(set))
+for root, dirs, files in os.walk(tree):
+    dirs[:] = [d for d in dirs if d != "out" and not d.startswith(".")]
+    base = os.path.basename(root)
+    if not base.startswith("values"):
+        continue
+    parent = os.path.dirname(root)
+    if os.path.basename(parent) != "res":
+        continue
+    module = os.path.dirname(parent)
+    for f in files:
+        if not f.endswith(".xml"):
+            continue
+        path = os.path.join(root, f)
+        for kind, name in defs(path):
+            mods[(module, base)][(kind, name)].add(f)
+
+bad = 0
+for (module, cfg), names in sorted(mods.items()):
+    dupes = {k: v for k, v in names.items() if len(v) > 1}
+    if not dupes:
+        continue
+    bad += 1
+    print("MODULE %s (%s)" % (os.path.relpath(module, tree), cfg))
+    for (kind, name), files in sorted(dupes.items())[:6]:
+        print("   %s/%s in: %s" % (kind, name, ", ".join(sorted(files))))
+    extra = len(dupes) - 6
+    if extra > 0:
+        print("   ... and %d more" % extra)
+print("COUNT %d" % bad)
+PY
+)
+
+dup_n=$(printf '%s\n' "$dup_out" | sed -n 's/^COUNT //p')
+if [ "${dup_n:-0}" -gt 0 ]; then
+    # NOT a pipeline: `... | while read` runs the loop in a subshell, so every
+    # bad() increments a copy of FAILS and the summary printed "0 blocking"
+    # under a list of failures - the check reported and then exited 0.
+    while IFS= read -r line; do
+        case "$line" in
+            MODULE*) bad "${line#MODULE } defines the same resource in more than one file.
+       aapt2 rejects the module; the build dies at link, long after
+       everything else has compiled." ;;
+            "") ;;
+            COUNT*) ;;
+            *) note "$line" ;;
+        esac
+    done <<EOF
+$dup_out
+EOF
+    note "If these are alternatives - one per mode, one active at a time -"
+    note "they cannot share an APK. Split them into overlay packages with a"
+    note "common android:category and let the OverlayManager pick one."
+else
+    ok "no resource defined twice in the same module and configuration"
+fi
+
 printf '\n%s== summary ==%s\n' "$BOLD" "$OFF"
 printf '  %d blocking, %d advisory\n' "$FAILS" "$WARNS"
 if [ "$FAILS" -gt 0 ]; then
