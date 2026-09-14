@@ -1,0 +1,34 @@
+diff --git a/private/access_vectors b/private/access_vectors
+index a49299e..8d59e63 100644
+--- a/private/access_vectors
++++ b/private/access_vectors
+@@ -187,6 +187,13 @@ inherits file
+ class anon_inode
+ inherits file
+ 
++class memfd_file
++inherits file
++{
++	execute_no_trans
++	entrypoint
++}
++
+ class lnk_file
+ inherits file
+ 
+diff --git a/private/security_classes b/private/security_classes
+index 0537214..31c55d1 100644
+--- a/private/security_classes
++++ b/private/security_classes
+@@ -17,6 +17,11 @@ class filesystem
+ class file
+ class anon_inode
+ class dir
++# Added to match the vendor policy on Pixel CP1A.260405.005, whose
++# hal_audio_default rules reference memfd_file. Without this class the
++# runtime policy compile a GSI is forced to do fails to resolve, init
++# cannot load policy, and the device panics at ~1.1s.
++class memfd_file
+ class fd
+ class lnk_file
+ class chr_file

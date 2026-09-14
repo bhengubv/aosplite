@@ -51,8 +51,12 @@ AUTO_FIX=1                 # close the loop by default: fix, learn, rebuild
 REPORT_EVERY=1200          # seconds between progress lines during a build
 STATUS_DIR=""              # where to publish status; auto-detected on WSL
 RULES=""                   # tools/failure-rules.txt; set once SELF is known
-PHASES="doctor sync check build verify flash boot"
-VBMETA=""                  # blank vbmeta to flash with verification off
+PHASES="doctor sync check build verify preflight-flash flash boot"
+VBMETA=""                  # factory vbmeta, flashed with verification off
+IMG=""                     # system image to flash; default: newest built
+CONTROL=""                 # known-good image to flash INSTEAD, as a control
+FORCE_FLASH=0              # flash even if preflight found blocking problems
+DELETE_STOCK_PARTS=0       # drop stock product/system_ext; a GSI brings its own
 WIPE=1                     # required after changing the boot state
 SERIAL=""                  # adb/fastboot serial, if more than one device
 BOOT_TIMEOUT=2400          # 40 min; a first boot on a wiped device is slow
@@ -74,9 +78,19 @@ Options
   --reference IMG        GSI to verify the built image against
   --jobs N               default nproc
   --phases "a b c"       run only these: doctor sync check build verify
-                         flash boot
-  --vbmeta IMG           blank vbmeta, flashed with verification disabled.
-                         Without it a device refuses a self-built image
+                         preflight-flash flash boot
+  --vbmeta IMG           vbmeta from the FACTORY image, flashed with
+                         verification disabled. Not an empty one: a vbmeta
+                         with no descriptors leaves the bootloader with no
+                         boot chain and it never attempts a boot at all
+  --img FILE             system image to flash (default: newest built)
+  --control FILE         flash this known-good image INSTEAD of yours, to
+                         prove the device and the procedure before blaming
+                         the build. Costs one flash, settles the question
+  --force-flash          flash even if preflight found blocking problems
+  --delete-stock-parts   delete the stock product/system_ext logical
+                         partitions. A GSI carries its own inside
+                         system.img; the stock ones just sit in super
   --serial S             adb/fastboot serial, if more than one device
   --no-wipe              skip erasing userdata (it will usually not boot)
   --boot-timeout SECS    default 2400
@@ -120,6 +134,10 @@ while [ $# -gt 0 ]; do
         --no-auto-fix) AUTO_FIX=0 ;;
         --status-dir) STATUS_DIR="$2"; shift ;;
         --vbmeta) VBMETA="$2"; shift ;;
+        --img) IMG="$2"; shift ;;
+        --control) CONTROL="$2"; shift ;;
+        --force-flash) FORCE_FLASH=1 ;;
+        --delete-stock-parts) DELETE_STOCK_PARTS=1 ;;
         --serial) SERIAL="$2"; shift ;;
         --no-wipe) WIPE=0 ;;
         --boot-timeout) BOOT_TIMEOUT="$2"; shift ;;
@@ -334,14 +352,18 @@ fi
 if runs check && [ "$MODE" = lite ]; then
     phase "check"
     blocked=0
-    for c in preflight check-modules; do
+    # check-product runs for every mode, not just lite: the faults it
+    # finds are product-configuration faults, not pruning faults, and a
+    # full manifest is no protection against them. Both of the ones it
+    # knows about built cleanly and boot-looped the device.
+    for c in preflight check-modules check-product; do
         s="$SELF/tools/$c.sh"
         [ -f "$s" ] || die "tools/$c.sh missing - refusing to build unchecked" 2
         info "$c.sh"
         set +e
         # preflight takes the product so it can tell a makefile this
         # build reads from another device's.
-        if [ "$c" = preflight ]; then
+        if [ "$c" = preflight ] || [ "$c" = check-product ]; then
             out=$(bash "$s" "$TREE" "$PRODUCT" 2>&1); rc=$?
         else
             out=$(bash "$s" "$TREE" 2>&1); rc=$?
@@ -349,7 +371,12 @@ if runs check && [ "$MODE" = lite ]; then
         set -e
         case "$rc" in
             0) note "  clean" ;;
-            1) blocked=1; echo "$out" | sed -n '/ACT ON THESE/,/^$/p;/BLOCKING/,/^$/p' | sed 's/^/  /' ;;
+            1) blocked=1
+               # check-product prints its findings as FAIL lines rather
+               # than in a block, so show those too - otherwise the phase
+               # says "blocked" and names nothing.
+               echo "$out" | sed -n '/ACT ON THESE/,/^$/p;/BLOCKING/,/^$/p' | sed 's/^/  /'
+               echo "$out" | grep -E '^  FAIL' | sed 's/^/  /' ;;
             *) die "$c.sh exited $rc - it did not complete" 2 ;;
         esac
     done
@@ -718,6 +745,295 @@ device_state() {
     else echo none; fi
 }
 
+# ======================================================== preflight-flash
+#
+# Everything in here is a failure we actually hit on a Pixel 7a, in the
+# order it cost us the most time. None of it is theoretical.
+#
+# The rule this phase exists to enforce: never learn from the device what
+# you could have learned from the file. A bad image costs a flash, a
+# reboot, a failed boot, a log hunt and often a hardware rescue - call it
+# twenty minutes - and every check below runs in seconds.
+#
+# It is also the phase that says "flash the known-good image first". When
+# a flash fails repeatedly, changing your own image again teaches nothing:
+# you cannot tell "my build is wrong" from "my procedure is wrong" until
+# one of them is held fixed. Run --control once and the answer is free.
+
+img_has() {
+    # Is $2 present inside ext4 image $1? debugfs prints an Inode: line for
+    # anything that exists. Quieter and far faster than mounting.
+    debugfs -R "stat $2" "$1" 2>/dev/null | grep -q "Inode:"
+}
+
+if runs preflight-flash; then
+    phase "preflight-flash"
+    PF_FAIL=0
+    pf_warn() { note "WARN  $1"; }
+    pf_bad()  { printf '  %sFAIL  %s%s\n' "$RED" "$1" "$OFF"; PF_FAIL=$((PF_FAIL+1)); }
+    pf_ok()   { info "ok    $1"; }
+
+    # --------------------------------------------------------- 1. the image
+    IMG="${IMG:-$(ls -t "$TREE"/out/target/product/*/system.img 2>/dev/null | head -1)}"
+    [ -n "$IMG" ] && [ -f "$IMG" ] || die "no system.img found. Build first, or pass --img."
+    info "image : $IMG ($(du -h "$IMG" | cut -f1))"
+
+    # The two halves of this phase do not live on the same machine. Reading
+    # the image needs debugfs, which is Linux; talking to the phone needs
+    # the Android platform tools, which under WSL sit on the Windows side.
+    # Requiring both in one place means neither half ever runs - so each is
+    # skipped independently, loudly, and the other still does its job.
+    pf_img_checks=1
+    if ! command -v debugfs >/dev/null 2>&1; then
+        pf_img_checks=0
+        pf_warn "debugfs not found - skipping every image check. Run this phase
+        on the build machine as well (sudo apt install e2fsprogs); those
+        are the checks that catch a bad build before it costs a flash."
+    fi
+
+    # A GSI is not just a system image. circle_arm64 inherited
+    # generic_system.mk but not gsi_release.mk, which produces a perfectly
+    # good EMULATOR image that panics on real hardware at ~1.1s with
+    # "Attempted to kill init! exitcode=0x00007f00". These three files are
+    # what gsi_release.mk adds, and what their absence costs.
+    if [ "$pf_img_checks" = 1 ]; then
+    for f in /system/system_ext/etc/init/config/skip_mount.cfg \
+             /system/system_ext/etc/init/init.gsi.rc \
+             /system/system_ext/etc/gsi/init.vndk-nodef.rc; do
+        if img_has "$IMG" "$f"; then
+            pf_ok "GSI file $(basename "$f")"
+        else
+            pf_bad "not a GSI: $f missing - is gsi_release.mk inherited?"
+        fi
+    done
+
+    # init and the linker it names. Exit code 127 means "could not exec",
+    # which is either a missing binary or a missing library - so check the
+    # binary, its interpreter, and every library it declares.
+    if img_has "$IMG" /system/bin/init; then
+        pf_ok "/system/bin/init present"
+        pf_tmp=$(mktemp -d)
+        debugfs -R "dump /system/bin/init $pf_tmp/init" "$IMG" >/dev/null 2>&1
+        if [ -s "$pf_tmp/init" ] && command -v readelf >/dev/null 2>&1; then
+            pf_interp=$(readelf -lW "$pf_tmp/init" 2>/dev/null |
+                        grep -o "interpreter: [^]]*" | head -1 | cut -d' ' -f2)
+            if [ -n "$pf_interp" ]; then
+                if img_has "$IMG" "$pf_interp"; then
+                    pf_ok "interpreter $pf_interp"
+                else
+                    pf_bad "init needs $pf_interp and it is not in the image"
+                fi
+            fi
+            pf_miss=0
+            for pf_lib in $(readelf -dW "$pf_tmp/init" 2>/dev/null |
+                            grep -o "Shared library: [^]]*" | cut -d'[' -f2); do
+                img_has "$IMG" "/system/lib64/$pf_lib" && continue
+                img_has "$IMG" "/system/lib64/bootstrap/$pf_lib" && continue
+                pf_bad "init needs $pf_lib - not in /system/lib64 or bootstrap"
+                pf_miss=$((pf_miss+1))
+            done
+            [ "$pf_miss" = 0 ] && pf_ok "all of init's shared libraries resolve"
+        fi
+        rm -rf "$pf_tmp"
+    else
+        pf_bad "/system/bin/init missing from the image"
+    fi
+
+    # A staging build boots on Cuttlefish and bootloops on retail hardware,
+    # and the only visible difference is three properties.
+    pf_bp=$(mktemp)
+    debugfs -R "dump /system/build.prop $pf_bp" "$IMG" >/dev/null 2>&1
+    if [ -s "$pf_bp" ]; then
+        pf_cn=$(grep -m1 "^ro.build.version.codename=" "$pf_bp" | cut -d= -f2)
+        pf_ps=$(grep -m1 "^ro.build.version.preview_sdk=" "$pf_bp" | cut -d= -f2)
+        if [ "$pf_cn" = REL ] && [ "$pf_ps" = 0 ]; then
+            pf_ok "released config (codename=$pf_cn preview_sdk=$pf_ps)"
+        else
+            pf_bad "staging build (codename=$pf_cn preview_sdk=$pf_ps) - build with
+        a released config such as -bp4a-, not -trunk_staging-"
+        fi
+    else
+        pf_warn "could not read build.prop from the image"
+    fi
+    rm -f "$pf_bp"
+    fi   # pf_img_checks
+
+    # --------------------------------------------------------- 2. vbmeta
+    #
+    # A vbmeta with no descriptors is 4096 bytes of header. Flashing one
+    # leaves the bootloader with no boot chain at all: it does not reject
+    # the image, it never attempts a boot - 620ms to fastboot, no AVB line
+    # in the log, and every slot still marked "boot ok". That looks exactly
+    # like a device ignoring you, and it cost a whole night.
+    if [ -n "$VBMETA" ]; then
+        if [ ! -f "$VBMETA" ]; then
+            pf_bad "--vbmeta $VBMETA does not exist"
+        elif [ "$(head -c4 "$VBMETA")" != "AVB0" ]; then
+            pf_bad "$VBMETA is not an AVB image (no AVB0 magic)"
+        else
+            # descriptors_size is a big-endian u64 at offset 104; flags is a
+            # big-endian u32 at offset 120. See AvbVBMetaImageHeader.
+            pf_dsz=$(od -An -tu4 -j108 -N4 --endian=big "$VBMETA" 2>/dev/null | tr -d ' ')
+            pf_flg=$(od -An -tu4 -j120 -N4 --endian=big "$VBMETA" 2>/dev/null | tr -d ' ')
+            if [ "${pf_dsz:-0}" -gt 0 ]; then
+                pf_ok "vbmeta carries $pf_dsz bytes of descriptors"
+            else
+                pf_bad "vbmeta has NO descriptors - the bootloader will have no boot
+        chain and will never attempt a boot. Use the vbmeta.img from the
+        factory image, not an empty one."
+            fi
+            case "${pf_flg:-0}" in
+                0) pf_warn "vbmeta flags=0 - verity and verification are ON. Flash it
+        with --disable-verity --disable-verification, or a self-built
+        system will not match the stock hashtree." ;;
+                *) pf_ok "vbmeta flags=$pf_flg (verity/verification bits set)" ;;
+            esac
+        fi
+    else
+        pf_warn "no --vbmeta given. Without one the device reports the image as
+        corrupt and refuses to boot it."
+    fi
+
+    # --------------------------------------------------------- 3. the device
+    #
+    # The device half is optional on purpose. Every check above reads a
+    # file and is worth running on a build machine that has never seen a
+    # phone - under WSL that is the normal case, because the platform
+    # tools live on the Windows side. Missing adb must not throw away the
+    # image checks that already passed.
+    ( find_tool adb ADB ) >/dev/null 2>&1 && find_tool adb ADB >/dev/null 2>&1
+    pf_have_tools=$?
+    if [ "$pf_have_tools" = 0 ]; then
+        ( find_tool fastboot FASTBOOT ) >/dev/null 2>&1 &&
+            find_tool fastboot FASTBOOT >/dev/null 2>&1
+        pf_have_tools=$?
+    fi
+
+    # "more than one device/emulator" makes adb get-state fail, and a naive
+    # check reads that as NO device - a silent pass on a machine that has
+    # one. A running emulator is enough to trigger it. Name the problem.
+    if [ "$pf_have_tools" = 0 ] && [ -z "$SERIAL" ]; then
+        pf_n=$("$ADB" devices 2>/dev/null | grep -cE "(device|unauthorized)$")
+        if [ "${pf_n:-0}" -gt 1 ]; then
+            pf_bad "$pf_n devices/emulators are attached, so adb cannot tell which
+        one you mean and every device check below would silently report
+        nothing. Pass --serial <id>. Attached:
+$("$ADB" devices 2>/dev/null | sed -n '2,$p' | sed 's/^/          /')"
+        fi
+    fi
+
+    if [ "$pf_have_tools" != 0 ]; then
+        pf_warn "adb/fastboot not reachable from here - image checks only.
+        Run the flash phases from Windows, or pass ADB= and FASTBOOT=."
+        pf_dev=skip
+    else
+        pf_dev=$(device_state)
+    fi
+
+    # Never let a check block. fastboot waits forever for a device that is
+    # not in fastboot mode, and a preflight that hangs is worse than one
+    # that fails - it looks like progress.
+    pf_fb() { timeout 15 "$FASTBOOT" ${SERIAL:+-s "$SERIAL"} "$@" 2>&1; }
+
+    case "$pf_dev" in
+        skip) ;;
+        adb)  pf_warn "the phone is booted in Android, not fastboot, so the device
+        checks below cannot run - fastboot would block waiting for it.
+        Reboot it first:  adb reboot bootloader" ;;
+        none) pf_warn "no device connected - image checks only" ;;
+        *)
+            pf_gv() { pf_fb getvar "$1" | grep -o "$1: .*" | head -1 | cut -d' ' -f2-; }
+
+            if [ "$(pf_gv unlocked)" = yes ]; then
+                pf_ok "bootloader unlocked"
+            else
+                pf_bad "bootloader is locked - nothing can be flashed"
+            fi
+
+            pf_slot=$(pf_gv current-slot)
+            [ -n "$pf_slot" ] || pf_slot=a
+            info "slot  : $pf_slot"
+
+            # Three failed boots and the bootloader marks the slot unbootable
+            # and stops trying. Flashing into that is a guaranteed non-event,
+            # and the fix is one command - so say so, rather than let someone
+            # spend another twenty minutes on a boot that never happens.
+            pf_rc=$(pf_gv "slot-retry-count:$pf_slot")
+            pf_ub=$(pf_gv "slot-unbootable:$pf_slot")
+            info "retries: ${pf_rc:-?}  unbootable: ${pf_ub:-?}"
+            if [ "${pf_rc:-3}" = 0 ] || [ "$pf_ub" = yes ]; then
+                pf_bad "slot $pf_slot has no boot attempts left. Reset it with
+        fastboot set_active $pf_slot   (that restores the retry count)"
+            fi
+
+            # oem ramdump is a bootloader setting that SURVIVES REBOOTS. With
+            # it on, a device that fails to boot no longer stops in fastboot -
+            # it loops forever and never enumerates on USB, so no command can
+            # reach it and the only recovery is holding the power button.
+            # Turn it off before flashing, always.
+            pf_rd=$(pf_fb oem ramdump | grep -o "ramdump \(enabled\|disabled\)" | head -1)
+            case "$pf_rd" in
+                *enabled)
+                    pf_bad "oem ramdump is ENABLED. A failed boot will loop without ever
+        appearing on USB, and will need a hardware rescue. Turn it off:
+        fastboot oem ramdump disable" ;;
+                *disabled) pf_ok "oem ramdump disabled" ;;
+            esac
+
+            # A GSI carries its own /product and /system_ext inside
+            # system.img. The device's stock ones stay behind unless they are
+            # deleted, and on a Pixel 7a that is 4.1 GB of product and 381 MB
+            # of system_ext sitting in super alongside the GSI.
+            for pf_p in product system_ext; do
+                pf_sz=$(pf_gv "partition-size:${pf_p}_${pf_slot}")
+                case "$pf_sz" in
+                    ""|0x0|0) pf_ok "${pf_p}_${pf_slot} already cleared" ;;
+                    *) pf_warn "${pf_p}_${pf_slot} still holds stock content ($pf_sz). A GSI
+        supplies its own. If the boot fails, clear it in fastbootd:
+        fastboot delete-logical-partition ${pf_p}_${pf_slot}" ;;
+                esac
+            done
+
+            # Record what we found, so the phase that changes it can put it
+            # back and so a later failure can be compared against a known
+            # starting point rather than a memory of one.
+            # Where the tree is not writable - running this half from
+            # Windows while the tree lives in WSL - fall back rather than
+            # claim a file was written that was not.
+            pf_st="$TREE/out/device-state-$(date +%Y%m%d-%H%M%S).txt"
+            mkdir -p "$(dirname "$pf_st")" 2>/dev/null ||
+                pf_st="${TMPDIR:-/tmp}/device-state-$(date +%Y%m%d-%H%M%S).txt"
+            if pf_fb getvar all > "$pf_st" 2>/dev/null && [ -s "$pf_st" ]; then
+                info "device state saved: $pf_st"
+            else
+                pf_warn "could not save device state to $pf_st"
+            fi
+            ;;
+    esac
+
+    # --------------------------------------------------------- 4. the control
+    #
+    # Hold your own image fixed and flash a known-good one instead. If it
+    # boots, the device, the boot chain, the vbmeta handling and this whole
+    # procedure are proven, and the fault is in your image alone. If it does
+    # not, no change to your build was ever going to help. Four minutes
+    # either way, and it is the difference between debugging and gambling.
+    if [ -n "$CONTROL" ]; then
+        [ -f "$CONTROL" ] || die "--control $CONTROL does not exist"
+        pf_warn "control run: $CONTROL will be flashed INSTEAD of your image"
+        IMG="$CONTROL"
+    fi
+
+    if [ "$PF_FAIL" -gt 0 ] && [ "$FORCE_FLASH" != 1 ]; then
+        alarm "PREFLIGHT FAILED" "$PF_FAIL blocking problem(s) - nothing flashed"
+        die "$PF_FAIL blocking problem(s) above. Nothing has been written to the
+  device. Fix them, or re-run with --force-flash to proceed anyway."
+    elif [ "$PF_FAIL" -gt 0 ]; then
+        pf_warn "$PF_FAIL blocking problem(s), flashing anyway (--force-flash)"
+    fi
+    pf_ok "preflight clean"
+fi
+
 if runs flash; then
     phase "flash"
 
@@ -752,17 +1068,62 @@ if runs flash; then
     info "slot   : ${slot:-unknown}"
     publish "flashing to slot ${slot:-?} $(date '+%H:%M:%S')"
 
+    # Order matters, and this is Google's, not ours. Erase before writing:
+    # the logical partition is resized to fit, and writing over a larger
+    # stock system leaves the tail of it behind.
+    info "erasing system"
+    fb_ erase system 2>&1 | tail -1 | sed 's/^/    /' || true
+
     info "flashing system"
     fb_ flash system "$IMG" 2>&1 | tail -2 | sed 's/^/    /' ||
         die "fastboot flash system failed"
 
+    # A GSI supplies its own /product and /system_ext inside system.img.
+    # The device's stock ones remain in super unless they are deleted - on
+    # a Pixel 7a that is 4.1 GB of product that the GSI never asked for.
+    if [ "$DELETE_STOCK_PARTS" = 1 ]; then
+        for p in product system_ext; do
+            info "deleting stock ${p}_${slot:-a}"
+            fb_ delete-logical-partition "${p}_${slot:-a}" 2>&1 |
+                tail -1 | sed 's/^/    /' || true
+        done
+    fi
+
+    # vbmeta goes LAST, and from the BOOTLOADER, not fastbootd. It is the
+    # root of the boot chain: write it first and the rest of the flash
+    # invalidates what it describes.
+    #
+    # WHICH vbmeta is not settled, and this project has been wrong about it
+    # in both directions. From init's own kernel log on one Pixel 7a:
+    #
+    #   minimal vbmeta (4096 bytes, 624 bytes of descriptors, flags=2)
+    #       -> "avb_handle with status: VerificationDisabled"
+    #          "AVB HASHTREE disabled on: /system"      -> /system mounted
+    #
+    #   factory vbmeta + --disable-verity --disable-verification
+    #       -> "avb_handle with status: Success", a verity table was built,
+    #          "DM_TABLE_LOAD failed ... Argument list too long",
+    #          "Failed to mount /system"                -> kernel panic
+    #
+    # The difference is WHERE the disable bit lives: flags=2 is set inside
+    # the file, while the factory vbmeta has flags=0 and relies on fastboot
+    # applying --disable-verification, which this device did not honour. The blank one fails differently when the slot's boot
+    # chain is incomplete: no boot is attempted at all, 620ms to fastboot,
+    # every slot still reported "boot ok".
+    #
+    # Pass whichever your device needs with --vbmeta, then CHECK the AVB
+    # status line in the kernel log rather than believing either story.
     if [ -n "$VBMETA" ] && [ -f "$VBMETA" ]; then
-        info "flashing vbmeta with verification disabled"
+        info "rebooting to bootloader fastboot for vbmeta"
+        fb_ reboot bootloader >/dev/null 2>&1 || true
+        sleep 22
+        info "flashing vbmeta with verity and verification disabled"
         fb_ --disable-verity --disable-verification flash vbmeta "$VBMETA" 2>&1 |
             tail -2 | sed 's/^/    /' || die "vbmeta flash failed"
     else
-        note "no --vbmeta given; skipping. Without a blank vbmeta the device"
-        note "will refuse a self-built image as corrupt."
+        note "no --vbmeta given; skipping. A self-built system needs verity"
+        note "off, and how to achieve that is device-specific - see the"
+        note "comment above this block before choosing one."
     fi
 
     if [ "$WIPE" = 1 ]; then
@@ -807,11 +1168,13 @@ if runs boot; then
   The reason is in the kernel's RAM console right now, and it is fragile:
 
     - it survives a reboot, NOT a power-off. Do not hold the power button.
-    - reading it needs a booted Android.
-    - userspace fastboot boots a recovery kernel and overwrites it, so
-      recovering the device the usual way destroys it first.
+    - reading it needs a booted Android, so restoring stock is how you
+      read it, not what destroys it.
+    - it holds ONE boot. Every extra reboot costs you the one you wanted.
 
-  Get it in one piece:
+  This works, and it is the fastest route to an actual answer - on
+  2026-09-14 it named a verity failure in one line after a night of
+  theories. Do it FIRST:
 
       tools/rescue-log.sh <unzipped-factory-image-dir>
 
@@ -893,9 +1256,10 @@ FELLBACK
             adb_ shell dumpsys dropbox --print SYSTEM_LAST_KMSG > "$crash" 2>/dev/null || true
             [ -s "$crash" ] && info "kernel log saved: $crash"
         else
-            note "no adb. The kernel log is in RAM and will be destroyed by"
-            note "the userspace fastboot needed to recover the device. Read it"
-            note "first if you can: boot a known-good image, then"
+            note "no adb. The kernel log is in RAM and holds only this boot."
+            note "Restore stock and read it - that is the proven route, not a"
+            note "last resort:"
+            note "  tools/rescue-log.sh <unzipped-factory-image-dir>"
             note "  adb shell dumpsys dropbox --print SYSTEM_LAST_KMSG"
         fi
         publish "DID NOT BOOT $(date '+%H:%M:%S') - ${crash:-no log captured}"

@@ -23,17 +23,26 @@
 #
 #   bootloader fastboot -> flash-all -> stock boots -> dumpsys dropbox
 #
-# HONEST WARNING: on a Pixel 7a this did not reproduce. The log was
-# recovered once this way and lost the next two times, and the likely
-# reason is that flash-all itself reboots into userspace fastboot to write
-# the logical partitions inside super - so the recovery kernel overwrites
-# the buffer before stock ever boots. If that is right, the log cannot be
-# recovered on that device once the boot has failed, and no ordering
-# helps.
+# STATUS: this works. It was used on a Pixel 7a on 2026-09-14 to recover
+# the kernel log of a failed CircleOS boot, and that log named the cause in
+# one line after a whole night of guessing:
 #
-# Try it anyway - it costs one restore you were going to do regardless -
-# but do not plan around it, and do not let it stop you acting on evidence
-# you already have.
+#   init: [libfs_avb] Returning avb_handle with status: Success
+#   init: [libfs_avb] Built verity table: ...
+#   init: DM_TABLE_LOAD failed: name=system-verity ...: Argument list too long
+#   init: Failed to mount /system: No such file or directory
+#   init: Failed to mount required partitions early ...
+#   Kernel panic - not syncing: Attempted to kill init!
+#
+# An earlier version of this file said the log "did not reproduce" and told
+# you not to plan around it. That was wrong, and it was expensive: it
+# discouraged the one method that actually answers the question, and hours
+# went into theories instead. It does not always work - it is one buffer
+# holding one boot - but it is the FIRST thing to try, not the last.
+#
+# Note flash-all does reboot through userspace fastboot to write the
+# logical partitions, and the log still survived that. Do not assume it
+# cannot.
 #
 # What definitely destroys it, each learned by doing it:
 #
@@ -88,6 +97,34 @@ if [ "$userspace" = yes ]; then
 LOST
     exit 1
 fi
+
+# ---------------------------------------------------------------------
+# First: ask the BOOTLOADER. This is the one source that costs nothing.
+#
+# `fastboot oem dmesg` dumps the bootloader's own console. No kernel runs,
+# so unlike every other route it cannot overwrite the RAM buffer, and it
+# works while the device is sitting in bootloader fastboot after a failed
+# boot. It records what the bootloader did - slot selection, AVB result,
+# why it gave up - which is often the whole answer.
+#
+# It is chatty and the USB endpoint times out partway on a long dump
+# ("AdbWriteEndpointSync failed: The semaphore timeout period has
+# expired"). Retry; each attempt gets a different amount. Killing stray
+# fastboot processes first helps, and a cable replug is safe - it is a
+# power-OFF that loses the log, not a disconnect.
+BOOT_OUT="${BOOT_OUT:-${OUT%.txt}-bootloader.txt}"
+echo
+echo "=== bootloader console (fastboot oem dmesg) ==="
+for attempt in 1 2 3; do
+    if fb oem dmesg > "$BOOT_OUT" 2>&1 && [ "$(wc -l < "$BOOT_OUT")" -gt 20 ]; then
+        say "captured $(wc -l < "$BOOT_OUT") lines: $BOOT_OUT"
+        grep -iE "fail|error|abort|panic|invalid|avb|verif|slot|boot reason"             "$BOOT_OUT" | tail -15 | sed 's/^/    /'
+        break
+    fi
+    say "attempt $attempt gave $(wc -l < "$BOOT_OUT" 2>/dev/null || echo 0) lines - retrying"
+    pkill -f 'fastboot' 2>/dev/null || true
+    sleep 3
+done
 
 [ -n "$DIR" ] || die "give the unzipped factory image directory:
       tools/rescue-log.sh ~/lynx-cp1a.260405.005"
