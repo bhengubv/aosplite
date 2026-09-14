@@ -78,11 +78,48 @@ pruned_tree() {
         ls "$TREE"/.repo/local_manifests/*.xml >/dev/null 2>&1
 }
 
+# --- environment checks -------------------------------------------------
+#
+# These run on EVERY build, pruned or not. Nothing here is about the source:
+# it is the ways a build is lost to the machine it runs on - a staging
+# release config, too little memory, a laptop that will suspend, and another
+# build already holding out/.lock.
+#
+# That last one is why this moved out of the pruned-tree block below. A
+# second build does not queue; it dies on the lock in seconds and leaves the
+# previous system.img in place, so the next flash silently writes stale code.
+# That has nothing to do with whether the tree was pruned.
+ENV_CHECK="$SELF/tools/check-env.sh"
+if [ ! -f "$ENV_CHECK" ]; then
+    echo "ERROR: $ENV_CHECK not found." >&2
+    echo "The checks are part of the build. Refusing to build without them" >&2
+    echo "rather than pretending they passed." >&2
+    exit 2
+fi
+
+echo "environment checks"
+echo
+set +e
+env_out=$(bash "$ENV_CHECK" "$TREE" "$LUNCH" "$TARGET" 2>&1)
+env_rc=$?
+set -e
+case "$env_rc" in
+    0) printf '%s\n' "$env_out" | tail -3 | sed 's/^/  /'
+       echo ;;
+    1) printf '%s\n' "$env_out"
+       echo >&2
+       echo "Not building. The environment will lose this build." >&2
+       exit 1 ;;
+    *) echo "ERROR: check-env.sh exited $env_rc - it did not complete." >&2
+       printf '%s\n' "$env_out" | tail -5 >&2
+       exit 2 ;;
+esac
+
 if pruned_tree; then
     echo "pruned tree - running checks"
     echo
 
-    CHECKS="check-env preflight check-modules"
+    CHECKS="preflight check-modules"
 
     for check in $CHECKS; do
         script="$SELF/tools/$check.sh"
@@ -99,14 +136,7 @@ if pruned_tree; then
         script="$SELF/tools/$check.sh"
         echo "  $check.sh ..."
         set +e
-        # check-env wants the target as well - it is the only one that can
-        # tell you the lunch config is staging or the make target builds
-        # nothing.
-        if [ "$check" = "check-env" ]; then
-            out=$(bash "$script" "$TREE" "$LUNCH" "$TARGET" 2>&1)
-        else
-            out=$(bash "$script" "$TREE" 2>&1)
-        fi
+        out=$(bash "$script" "$TREE" 2>&1)
         rc=$?
         set -e
         case "$rc" in

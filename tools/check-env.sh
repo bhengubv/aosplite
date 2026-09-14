@@ -375,6 +375,58 @@ else
 fi
 
 echo
+echo "=== another build already running ==="
+
+# A second build does not queue. soong_ui takes out/.lock, the newcomer
+# fails on it, and the failure looks like nothing to do with locking:
+#
+#   ninja: build stopped: subcommand failed
+#   #### failed to build some targets (13 seconds) ####
+#
+# Thirteen seconds, no error.log entry, and a system.img left on disk from
+# the PREVIOUS build with an older timestamp. That is the trap: the image is
+# still there, so a flash appears to work and silently flashes stale code.
+# This has happened here more than once, and cost a flash-and-puzzle cycle
+# each time.
+#
+# Two ways of asking, because either can be unavailable: who holds the lock
+# file, and whether a build process exists at all.
+
+holder=""
+if command -v fuser >/dev/null 2>&1 && [ -e "$TREE/out/.lock" ]; then
+    # fuser exits 1 when nobody holds the file, and this script runs under
+    # `set -eo pipefail` - without the guard, a CLEAN tree kills the script
+    # here, check-env exits 1, and build.sh refuses every build with no
+    # message at all.
+    holder=$(fuser "$TREE/out/.lock" 2>/dev/null | tr -s ' ' || true)
+fi
+
+# Match the real build processes. Deliberately NOT a bare "ninja": an editor
+# or a grep with ninja in its command line would match, and a check that
+# cries wolf gets ignored, which is worse than no check.
+running=$(ps -eo pid,etime,args 2>/dev/null |
+          grep -E "(out/soong_ui|build/soong/bin/m |soong_build --top|prebuilts/build-tools/[^ ]*/ninja )" |
+          grep -v grep || true)
+
+if [ -n "$running" ]; then
+    bad "a build is already running on this tree"
+    printf '%s\n' "$running" | head -4 | while IFS= read -r line; do
+        say "" "$(printf '%s' "$line" | cut -c1-96)"
+    done
+    say "" ""
+    say "" "Starting a second build does not queue - it dies on out/.lock in"
+    say "" "seconds, leaves the previous system.img in place, and flashing"
+    say "" "that image flashes stale code."
+    say "" "Wait for it, or stop it:  kill \$(pgrep -f out/soong_ui)"
+elif [ -n "$holder" ]; then
+    bad "out/.lock is held by PID(s):$holder"
+    say "" "No build process matched, so this may be a stale lock from a"
+    say "" "build that was killed. Check that PID before removing it."
+else
+    ok "no other build is running on this tree"
+fi
+
+echo
 if [ "$fail" -gt 0 ]; then
     echo "$fail blocking, $warn advisory. Fix the blocking ones."
     exit 1
