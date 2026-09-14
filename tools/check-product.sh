@@ -3,9 +3,11 @@
 #
 #   tools/check-product.sh ~/android circle_arm64
 #
-# Catches two product-configuration faults that a build reports as SUCCESS
-# and a device reports as a boot loop. Both cost a full build-flash-boot
-# cycle to find any other way, and both were found the hard way here.
+# Catches four faults that cost a full build, or a build-flash-boot cycle,
+# to find any other way. Every one of them was found the hard way here.
+# The first two are reported by the build as SUCCESS and by the device as
+# a boot loop; the last two fail the build at the very end, after the
+# compile time has already been spent.
 #
 #   1. Duplicated VNDK versions
 #      Two products each contributing PRODUCT_EXTRA_VNDK_VERSIONS produces
@@ -206,11 +208,79 @@ PYP
     fi
 fi
 
+# ==================================== 3. stray files in resource directories
+printf '\n%s== 3. resource directories ==%s\n' "$BOLD" "$OFF"
+note "aapt2 rejects any file in res/ that is not a resource"
+#
+# A single editor backup left in a res/ tree fails the build - and it fails
+# at the very end, after seventeen minutes, with a message that names the
+# file but not the cause:
+#
+#   error: invalid file path
+#     'vendor/circle/overlay/systemui/res/values/circle_overlay_config.xml.bak.201138'
+#
+# Cheap to check, expensive to hit.
+stray=$(find "$TREE/vendor" "$TREE/device" "$TREE/build" -path "*/res/*" -type f \
+        \( -name "*.bak*" -o -name "*.orig" -o -name "*~" -o -name "*.rej" \
+           -o -name "*.swp" -o -name "*.tmp" \) 2>/dev/null | head -20)
+if [ -n "$stray" ]; then
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        bad "$(echo "$f" | sed "s#$TREE/##") is inside a res/ directory.
+       aapt2 rejects it and the build fails during packaging. Move it
+       outside the resource tree."
+    done <<< "$stray"
+else
+    ok "no editor backups or temp files inside any res/ directory"
+fi
+
+# ================================== 4. malformed XML in a resource directory
+#
+# aapt2 parses every file under res/ and refuses the whole module on the
+# first malformed one:
+#
+#   themes_mode_secure.xml:0: error: xml parser error: mismatched tag.
+#   error: file failed to compile.
+#
+# The line number is 0 and the message does not say which tag, so the file
+# has to be read by eye. The one that cost a build here closed an <item>
+# with </color>, and had been committed in that state for months - harmless
+# only because the module it lives in was not in PRODUCT_PACKAGES, so aapt2
+# had never been asked to compile it. Adding the module to the product is
+# what surfaced it, sixteen minutes into a build.
+#
+# Checking is a parse of every resource XML in the tree and takes seconds.
+malformed=$(find "$TREE/vendor" "$TREE/device" "$TREE/build" \
+            -path "*/res/*" -name "*.xml" -type f 2>/dev/null |
+    while IFS= read -r f; do
+        python3 -c 'import sys,xml.dom.minidom as m; m.parse(sys.argv[1])' "$f" 2>/dev/null ||
+            printf '%s\n' "$f"
+    done)
+nxml=$(find "$TREE/vendor" "$TREE/device" "$TREE/build" \
+       -path "*/res/*" -name "*.xml" -type f 2>/dev/null | wc -l)
+if [ -n "$malformed" ]; then
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        # Report the parser's own reason - it names the line, unlike aapt2.
+        why=$(python3 -c 'import sys,xml.dom.minidom as m
+try:
+    m.parse(sys.argv[1])
+except Exception as e:
+    print(e)' "$f" 2>/dev/null)
+        bad "$(echo "$f" | sed "s#$TREE/##") is not well-formed XML.
+       $why
+       aapt2 fails the whole module on this, at the end of the build."
+    done <<< "$malformed"
+else
+    ok "all $nxml resource XML files parse"
+fi
+
 printf '\n%s== summary ==%s\n' "$BOLD" "$OFF"
 printf '  %d blocking, %d advisory\n' "$FAILS" "$WARNS"
 if [ "$FAILS" -gt 0 ]; then
     printf '\n  %sDo not build an image from this tree until these are fixed.%s\n' "$RED" "$OFF"
-    printf '  Each one boot-loops the device while the build reports success.\n'
+    printf '  Each one either boot-loops the device while the build reports\n'
+    printf '  success, or fails the build after the compile time is spent.\n'
     exit 1
 fi
 exit 0
