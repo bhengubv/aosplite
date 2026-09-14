@@ -102,8 +102,18 @@ if pruned_tree; then
         # check-env wants the target as well - it is the only one that can
         # tell you the lunch config is staging or the make target builds
         # nothing.
+        #
+        # preflight wants the PRODUCT. Without it, it scans the whole tree
+        # and blocks on dangling references in makefiles this product never
+        # reads - device/google_car's references to pruned Pixel device
+        # trees stopped a circle_arm64 build that had nothing to do with
+        # them. preflight already walks the inherit chain when given a
+        # product; it just was not being given one. Product is the first
+        # field of the lunch target: circle_arm64-bp4a-userdebug.
         if [ "$check" = "check-env" ]; then
             out=$(bash "$script" "$TREE" "$LUNCH" "$TARGET" 2>&1)
+        elif [ "$check" = "preflight" ]; then
+            out=$(bash "$script" "$TREE" "${LUNCH%%-*}" 2>&1)
         else
             out=$(bash "$script" "$TREE" 2>&1)
         fi
