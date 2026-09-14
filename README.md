@@ -21,6 +21,7 @@ No promises. Use it, or don't.
 | `products/` | Three optional `lunch` targets: generic, watch, desktop |
 | `tools/` | Init, the checks, the build wrapper, the flash pipeline, per-release maintenance |
 | `patches/` | Changes to AOSP projects that have no repo of their own to hold them |
+| `docs/TUTORIAL.md` | **Start here to build and flash** — clone to booted device, end to end |
 | `docs/RATIONALE.md` | What was cut and why |
 | `docs/EMULATOR.md` | Running what you built, on Cuttlefish or raw QEMU |
 | `SETUP.md` | Building AOSP from nothing, if you have not before |
@@ -51,10 +52,16 @@ Approximate, and they move with each release.
 
 ## Use
 
-If you have never built AOSP, start with [SETUP.md](SETUP.md). It covers
-host packages, the `repo` tool, disk and RAM requirements, the WSL2
-filesystem trap, ccache, and what each common failure means. This
-section assumes you are past that.
+[docs/TUTORIAL.md](docs/TUTORIAL.md) is the full walk-through — clone,
+sync, check, build, verify the image, get a vbmeta that actually disables
+verification, flash, confirm the device booted, and read the log when it
+does not. Every command in it has been run and every failure it describes
+actually happened.
+
+If you have never built AOSP, start with [SETUP.md](SETUP.md) instead. It
+covers host packages, the `repo` tool, disk and RAM requirements, the WSL2
+filesystem trap, ccache, and what each common failure means. This section
+assumes you are past that.
 
 ```
 git clone https://github.com/<you>/aosplite
