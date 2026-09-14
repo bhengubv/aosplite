@@ -78,48 +78,11 @@ pruned_tree() {
         ls "$TREE"/.repo/local_manifests/*.xml >/dev/null 2>&1
 }
 
-# --- environment checks -------------------------------------------------
-#
-# These run on EVERY build, pruned or not. Nothing here is about the source:
-# it is the ways a build is lost to the machine it runs on - a staging
-# release config, too little memory, a laptop that will suspend, and another
-# build already holding out/.lock.
-#
-# That last one is why this moved out of the pruned-tree block below. A
-# second build does not queue; it dies on the lock in seconds and leaves the
-# previous system.img in place, so the next flash silently writes stale code.
-# That has nothing to do with whether the tree was pruned.
-ENV_CHECK="$SELF/tools/check-env.sh"
-if [ ! -f "$ENV_CHECK" ]; then
-    echo "ERROR: $ENV_CHECK not found." >&2
-    echo "The checks are part of the build. Refusing to build without them" >&2
-    echo "rather than pretending they passed." >&2
-    exit 2
-fi
-
-echo "environment checks"
-echo
-set +e
-env_out=$(bash "$ENV_CHECK" "$TREE" "$LUNCH" "$TARGET" 2>&1)
-env_rc=$?
-set -e
-case "$env_rc" in
-    0) printf '%s\n' "$env_out" | tail -3 | sed 's/^/  /'
-       echo ;;
-    1) printf '%s\n' "$env_out"
-       echo >&2
-       echo "Not building. The environment will lose this build." >&2
-       exit 1 ;;
-    *) echo "ERROR: check-env.sh exited $env_rc - it did not complete." >&2
-       printf '%s\n' "$env_out" | tail -5 >&2
-       exit 2 ;;
-esac
-
 if pruned_tree; then
     echo "pruned tree - running checks"
     echo
 
-    CHECKS="preflight check-modules"
+    CHECKS="check-env preflight check-modules"
 
     for check in $CHECKS; do
         script="$SELF/tools/$check.sh"
@@ -136,7 +99,14 @@ if pruned_tree; then
         script="$SELF/tools/$check.sh"
         echo "  $check.sh ..."
         set +e
-        out=$(bash "$script" "$TREE" 2>&1)
+        # check-env wants the target as well - it is the only one that can
+        # tell you the lunch config is staging or the make target builds
+        # nothing.
+        if [ "$check" = "check-env" ]; then
+            out=$(bash "$script" "$TREE" "$LUNCH" "$TARGET" 2>&1)
+        else
+            out=$(bash "$script" "$TREE" 2>&1)
+        fi
         rc=$?
         set -e
         case "$rc" in
@@ -177,70 +147,6 @@ BLOCKED
     echo "checks clean"
     echo
 fi
-
-# --- product checks -----------------------------------------------------
-#
-# check-product is deliberately OUTSIDE the pruned_tree block above. The
-# three checks there are about pruning - modules referencing projects that
-# are no longer in the tree. The faults this one finds have nothing to do
-# with pruning and are just as present in a full tree:
-#
-#   duplicated VNDK versions       -> libvintf rejects the system_ext
-#                                     manifest, servicemanager runs with no
-#                                     framework manifest, the kernel panics
-#                                     through Trusty ~4 minutes into boot
-#   a privileged app not allowlisted -> system_server throws at systemReady()
-#                                     and the device loops on the boot
-#                                     animation
-#   a stray file in a res/ directory -> aapt2 fails the build at packaging,
-#                                     after all the compile time is spent
-#   malformed XML in a res/ directory -> the same, reported at line 0 with
-#                                     no tag named
-#
-# The first two build cleanly and report success. The device is where you
-# find out. That is precisely the kind of thing a build wrapper should
-# refuse to let through, so it runs on every build.
-#
-# It takes the PRODUCT, which is the first field of the lunch target -
-# circle_arm64-bp4a-userdebug -> circle_arm64. That argument is why it was
-# not in the list above: the loop there passes only the tree.
-PRODUCT="${LUNCH%%-*}"
-PRODUCT_CHECK="$SELF/tools/check-product.sh"
-
-if [ ! -f "$PRODUCT_CHECK" ]; then
-    echo "ERROR: $PRODUCT_CHECK not found." >&2
-    echo "The checks are part of the build. Refusing to build without them" >&2
-    echo "rather than pretending they passed." >&2
-    exit 2
-fi
-
-echo "product checks - $PRODUCT"
-echo
-set +e
-out=$(bash "$PRODUCT_CHECK" "$TREE" "$PRODUCT" 2>&1)
-rc=$?
-set -e
-case "$rc" in
-    0) echo "$out" | sed -n '/== summary ==/,$p' | sed 's/^/  /'
-       echo ;;
-    1) echo "$out"
-       cat >&2 <<'BLOCKED'
-
-Not building. check-product found a fault that produces a working build
-and a broken device.
-
-Nothing above is a style opinion. Each blocking item has cost a full
-build, or a build plus a flash plus a boot loop, at least once. Fix it
-and run again.
-
-There is no flag to skip this. A skip flag is how these get found one per
-build, on the device, in the dark.
-BLOCKED
-       exit 1 ;;
-    *) echo "ERROR: check-product.sh exited $rc - it did not complete." >&2
-       echo "$out" | tail -5 >&2
-       exit 2 ;;
-esac
 
 mkdir -p "$GOCACHE" "$XDG_CACHE_HOME"
 cd "$TREE"

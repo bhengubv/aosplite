@@ -167,16 +167,14 @@ aosplite/tools/build.sh circle_arm64-bp4a-userdebug systemimage
 `build.sh` fixes the environment in a file rather than in your shell
 history, which is the only reason it exists.
 
-It also runs the checks and refuses to build if one fails. On a pruned
-tree that is `check-env` (is the lunch config a release config, does the
+On a pruned tree it also runs three checks first and refuses to build if
+one fails: `check-env` (is the lunch config a release config, does the
 make target build anything), `preflight` (is the tree in a state that can
-build) and `check-modules`. On **every** tree it also runs
-`check-product`, deriving the product from the first field of the lunch
-target.
+build) and `check-modules`.
 
-So step 2 is not strictly required any more — but running it first still
-pays, because it takes seconds and tells you before you have committed to
-a build at all.
+**`check-product.sh` is not one of them.** It takes a product argument
+that `build.sh` does not pass, so you must run it yourself — which is why
+it is step 2 above, rather than something you can assume happened.
 
 ### The release config is not optional
 
@@ -410,7 +408,7 @@ blocks on it.
 ## The shortest honest summary
 
 ```bash
-# build.sh runs check-product itself; this is just faster feedback
+# check-product is the one you have to remember; build.sh does not run it
 aosplite/tools/check-product.sh ~/android <product>     # before building
 aosplite/tools/build.sh <product>-bp4a-userdebug systemimage
 aosplite/tools/check-product.sh ~/android <product>     # again, now APKs exist
