@@ -19,13 +19,25 @@ No promises. Use it, or don't.
 |---|---|
 | `manifests/` | Five prune tiers, plus one opt-in extra |
 | `products/` | Three optional `lunch` targets: generic, watch, desktop |
-| `tools/` | Init, the four checks, build wrapper, per-release maintenance |
+| `tools/` | Init, the checks, the build wrapper, the flash pipeline, per-release maintenance |
+| `patches/` | Changes to AOSP projects that have no repo of their own to hold them |
 | `docs/RATIONALE.md` | What was cut and why |
 | `docs/EMULATOR.md` | Running what you built, on Cuttlefish or raw QEMU |
 | `SETUP.md` | Building AOSP from nothing, if you have not before |
 
 The manifests and the product are independent. Take the prune list and
 bring your own product config, or take the product and prune nothing.
+
+## Used by Circle OS
+
+This repository is one of the two core repositories of
+[Circle OS](https://github.com/bhengubv/CircleOS) — it is the base that OS
+is built on, and the pipeline that builds, checks and flashes it. The other
+core repository is the specification.
+
+It does not depend on Circle OS and does not mention it anywhere in the
+manifests or the product configs. Take the prune tiers, take the checks,
+take the flash pipeline, and build whatever you like with them.
 
 ## Sizes
 
@@ -403,10 +415,19 @@ about 20 minutes, and ninja plans roughly 165,000 actions. Getting there
 needed the six restorations under *Do not cut* plus
 `ALLOW_MISSING_DEPENDENCIES=true`.
 
-**Not verified - the built image.** No build here has been carried
-through to a flashed, booted device from these targets, and
-`products/lite_arm64.mk` has never been booted at all. The per-tier size
-figures remain estimates.
+**Verified - a built image, flashed and booted.** A GSI built from a tree
+with all five tiers applied on `android-16.0.0_r4` boots on a Google
+Pixel 7a (`lynx`, CP1A.260405.005): `sys.boot_completed=1`, 335 services,
+no crash-buffer entries. Flashed with `tools/flash.sh`, which ran flash
+preflight first.
+
+Scope that claim carefully: the product built was Circle OS's
+`circle_arm64`, not a target in this repository. What it proves is that a
+tree pruned by these five tiers, with the six restorations under *Do not
+cut*, produces a bootable arm64 GSI.
+
+**Not verified - the targets here.** `products/lite_arm64.mk` has still
+never been booted, and the per-tier size figures remain estimates.
 
 **Verified separately.** The QEMU path in
 [docs/EMULATOR.md](docs/EMULATOR.md), on a different tree - an arm64 GSI
