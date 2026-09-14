@@ -7,14 +7,47 @@ Every command here has been run. Every failure described is one that
 actually happened, with the message it actually produced. Where a step
 looks paranoid, it is because skipping it cost hours.
 
-The worked example is a Google Pixel 7a (`lynx`) and the Circle OS
-product. Substitute your own device and product; the shape does not
-change.
-
 **Before you start**, if you have never built AOSP: read
 [SETUP.md](../SETUP.md) first. It covers host packages, the `repo` tool,
 disk and RAM, the WSL2 filesystem trap, and ccache. This tutorial assumes
 you are past that.
+
+---
+
+## First: which image are you building?
+
+There are two, they are not the same thing, and the difference is not
+branding. Decide now, because it changes steps 1 through 3. Steps 4
+onward are identical.
+
+| | **AOSPLite** | **Circle OS** |
+|---|---|---|
+| What it is | Plain AOSP, trimmed. No Google, no vendor payload, no house style | A product built on AOSPLite: its own apps, launcher, theme, fonts, permissions and microG |
+| Repos needed | this one | this one **and** [`CircleOS`](https://github.com/bhengubv/CircleOS) plus the `CircleOS_*` projects |
+| Product | `lite_arm64` | `circle_arm64` |
+| Form factor | **neutral** — `handheld_system_ext` and telephony are dropped | handheld |
+| Booted on real hardware? | **no — see the warning below** | yes: Pixel 7a, 2026-09-14 |
+
+### If you build AOSPLite, know what you get
+
+`lite_arm64` keeps `core_64_bit.mk` and `generic_system.mk` and drops
+`handheld_system_ext.mk`, `telephony_system_ext.mk` and
+`aosp_product.mk`. What remains is form-factor-neutral — it is the layer
+TV, Wear, Automotive and handheld all sit on.
+
+That means **no launcher, no dialer, no phone UX**. It boots; there is
+not much to look at. That is deliberate: it is a base to build a product
+on, not a product. If you want a usable handheld out of the box, either
+build upstream `aosp_arm64` or add the handheld inherits back.
+
+> **`lite_arm64` has never been flashed to a device.** The mechanics in
+> this tutorial — the checks, the build wrapper, the vbmeta, the flash
+> order, the log recovery — are all verified, but they were verified by
+> building and booting Circle OS's `circle_arm64` from a tree pruned by
+> these tiers. The procedure is proven. This particular target is not.
+> If you boot it, corrections are welcome.
+
+Substitute your product name for `<product>` throughout.
 
 ---
 
@@ -32,21 +65,46 @@ you are past that.
 
 ## 1. Get a tree
 
+Both paths start the same way:
+
 ```bash
 git clone https://github.com/<you>/aosplite
 aosplite/tools/init.sh ~/android android-16.0.0_r4
 cd ~/android
-repo sync -c -j$(nproc) --no-clone-bundle --prune
 ```
 
 `init.sh` runs `repo init` and installs the five prune tiers into
 `.repo/local_manifests/`. Any release tag works.
 
-If you are building Circle OS rather than a target from this repository,
-add its overlay manifest as well — see
-[CircleOS/docs/REPO_MANIFEST.md](https://github.com/bhengubv/CircleOS/blob/main/docs/REPO_MANIFEST.md).
+### AOSPLite — sync and add the products
 
-### A pruned tree needs one environment variable
+```bash
+repo sync -c -j$(nproc) --no-clone-bundle --prune
+cp -r aosplite/products device/aosplite
+```
+
+### Circle OS — add the overlay manifest first
+
+Circle OS is assembled from separate repositories that sync into fixed
+paths in the same tree. Add its manifest alongside the prune tiers, then
+sync once:
+
+```bash
+curl -o .repo/local_manifests/circle.xml \
+     https://raw.githubusercontent.com/bhengubv/CircleOS/main/manifests/circle.xml
+repo sync -c -j$(nproc) --no-clone-bundle --prune
+```
+
+That brings in `vendor/circle`, `build/circle`, `device/circle/*` and
+`packages/apps/CircleLauncher`. The full inventory, and the things in it
+that are not what they look like, are in
+[CircleOS/docs/WHERE_EVERYTHING_LIVES.md](https://github.com/bhengubv/CircleOS/blob/main/docs/WHERE_EVERYTHING_LIVES.md).
+
+Do **not** delete upstream `frameworks/base` to make room for a Circle
+fork. Older instructions said to; the fork is not in use and removing the
+upstream project breaks the tree.
+
+### Either way, a pruned tree needs one environment variable
 
 ```bash
 export ALLOW_MISSING_DEPENDENCIES=true
@@ -61,7 +119,7 @@ you; if you run `m` by hand, you need it.
 ## 2. Check the tree *before* you spend a build
 
 ```bash
-aosplite/tools/check-product.sh ~/android circle_arm64
+aosplite/tools/check-product.sh ~/android <product>
 ```
 
 This is the cheapest step in the whole document and it catches four
@@ -90,11 +148,19 @@ built APKs under `out/target/product/<device>/system`, so on a tree that
 has never been built it has nothing to look at yet — run it again after
 the first build.
 
+Both faults check 1 and 2 catch came from a product carrying its own apps
+and overlays. A bare AOSPLite build has no privileged apps of its own and
+is unlikely to trip either. Run it anyway; it costs seconds.
+
 ---
 
 ## 3. Build
 
 ```bash
+# AOSPLite
+aosplite/tools/build.sh lite_arm64-bp4a-userdebug systemimage
+
+# Circle OS
 aosplite/tools/build.sh circle_arm64-bp4a-userdebug systemimage
 ```
 
@@ -108,8 +174,7 @@ build) and `check-modules`.
 
 **`check-product.sh` is not one of them.** It takes a product argument
 that `build.sh` does not pass, so you must run it yourself — which is why
-it is step 2 above and step 3 below, rather than something you can assume
-happened.
+it is step 2 above, rather than something you can assume happened.
 
 ### The release config is not optional
 
@@ -136,7 +201,8 @@ PLATFORM_VERSION=16
 
 ### Where the image lands
 
-Under `PRODUCT_DEVICE`, which is often not the product name:
+Under `PRODUCT_DEVICE`, which is often not the product name. Both
+products here build `generic_arm64`:
 
 ```
 out/target/product/generic_arm64/system.img
@@ -148,6 +214,10 @@ Turning `USE_CCACHE` on or off changes `CC_WRAPPER`, which changes every
 C++ compile command, which makes ninja rebuild all ~100,000 of them.
 Whatever `out/` was built with, keep it. This turned a 90-minute build
 into a 28-hour one once.
+
+---
+
+> **Everything from here is the same for both products.**
 
 ---
 
@@ -198,14 +268,14 @@ passed and ignored.
 
 ```bash
 python3 external/avb/avbtool.py make_vbmeta_image \
-        --flags 2 --padding_size 4096 --output ~/lynx/gsi-vbmeta.img
+        --flags 2 --padding_size 4096 --output ~/vbmeta-disabled.img
 ```
 
 Flag bit 1 (value 2) is `AVB_VBMETA_IMAGE_FLAGS_VERIFICATION_DISABLED`.
 Read it back before trusting it — offset 120, four bytes, big-endian:
 
 ```bash
-python3 - ~/lynx/gsi-vbmeta.img <<'PY'
+python3 - ~/vbmeta-disabled.img <<'PY'
 import struct, sys
 b = open(sys.argv[1], "rb").read()
 flags = struct.unpack(">I", b[120:124])[0]
@@ -226,7 +296,7 @@ is incomplete — no boot is attempted at all.
 ```bash
 aosplite/tools/flash.sh \
     --img    out/target/product/generic_arm64/system.img \
-    --vbmeta ~/lynx/gsi-vbmeta.img \
+    --vbmeta ~/vbmeta-disabled.img \
     --serial <your serial>
 ```
 
@@ -287,6 +357,10 @@ adb shell getprop ro.build.fingerprint   # yours, not the stock one
 `sys.boot_completed` reads empty for a while during a first boot after a
 wipe. An empty answer thirty seconds in means "not yet", not "failed" —
 wait and ask again before concluding anything.
+
+On an AOSPLite image, expect a booted system with no home screen. That is
+the product, not a fault. `sys.boot_completed=1` and a populated service
+list are the success criteria there.
 
 ---
 
