@@ -179,7 +179,28 @@ PF="$SELF_DIR/flash-preflight.sh"
 PF_IMAGE_RC=0
 if [ "$HAVE_DEBUGFS_LOCAL" != 1 ] && command -v wsl.exe >/dev/null 2>&1; then
     info "no debugfs here; running the image checks through WSL"
-    wslpath_of() { wsl.exe -e wslpath -a "$1" 2>/dev/null | tr -d ''; }
+    # A Git Bash path (/c/Development/x) is NOT a WSL path, and it is not a
+    # Windows path either. Handing it to `wslpath -a` makes WSL resolve it
+    # against its own cwd, which silently produced /mnt/c/c/Development/x -
+    # a path that does not exist. preflight then exited 127 and the flash was
+    # blocked for the wrong reason. Convert the drive letter ourselves.
+    wslpath_of() {
+        case "$1" in
+            /mnt/*) printf '%s
+' "$1" ;;
+            [A-Za-z]:[\/]*)
+                d=$(printf '%s' "$1" | cut -c1 | tr 'A-Z' 'a-z')
+                r=$(printf '%s' "$1" | cut -c4- | tr '\' '/')
+                printf '/mnt/%s/%s
+' "$d" "$r" ;;
+            /[A-Za-z]/*)
+                d=$(printf '%s' "$1" | cut -c2 | tr 'A-Z' 'a-z')
+                r=$(printf '%s' "$1" | cut -c3-)
+                printf '/mnt/%s%s
+' "$d" "$r" ;;
+            *)  wsl.exe -e wslpath -a "$1" 2>/dev/null | tr -d '' ;;
+        esac
+    }
     w_img=$(wslpath_of "$IMG")
     w_pf=$(wslpath_of "$PF")
     w_log=$(wslpath_of "${LOG%.log}-preflight-image.log")
