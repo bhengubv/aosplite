@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android.hardware.type.pc
+
+  AOSP declares this inline inside pc_core_hardware.xml rather than as its own file. Standalone copy for products that want the type without the rest of the PC profile - do NOT use both, or one destination gets two sources.
+
+  Declaring a feature makes PackageManager report it as present on every
+  device running the image. Copy this only into a product whose devices
+  genuinely have the capability.
+-->
+<permissions>
+    <feature name="android.hardware.type.pc" />
+</permissions>

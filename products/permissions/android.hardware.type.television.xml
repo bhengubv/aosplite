@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android.hardware.type.television
+
+  AOSP ships no XML for this feature at android-16.0.0_r4 - verified against
+  frameworks/native/data/etc, 170 files, none matching. device/google/atv declares this in its own tree, not in frameworks.
+
+  Declaring a feature makes PackageManager report it unconditionally. Only
+  copy this into a product whose devices actually have the capability.
+-->
+<permissions>
+    <feature name="android.hardware.type.television" />
+</permissions>

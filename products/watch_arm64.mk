@@ -64,12 +64,18 @@ PRODUCT_DEVICE := generic_arm64
 PRODUCT_BRAND  := AOSPLite
 PRODUCT_MODEL  := AOSPLite Watch
 
-# The wearable hardware profile, and the device-type declaration AOSP
-# does not ship. Both land in /system/etc/permissions where
-# PackageManager reads them at boot.
+# The wearable hardware profile. android.hardware.type.watch, which AOSP
+# declares nowhere, comes from the formfactor set in features.mk below.
 PRODUCT_COPY_FILES += \
-    frameworks/native/data/etc/wearable_core_hardware.xml:system/etc/permissions/wearable_core_hardware.xml \
-    device/aosplite/permissions/android.hardware.type.watch.xml:system/etc/permissions/android.hardware.type.watch.xml
+    frameworks/native/data/etc/wearable_core_hardware.xml:system/etc/permissions/wearable_core_hardware.xml
+
+AOSPLITE_FEATURE_SETS := all
+$(call inherit-product, device/aosplite/features.mk)
+
+# The build-time counterpart. The XML above is what PackageManager reads;
+# this lets frameworks/base constant-fold hasSystemFeature(FEATURE_WATCH)
+# rather than look it up. Set to match the XML, never instead of it.
+RELEASE_SYSTEM_FEATURE_WATCH := 0
 
 # Drives -watch resource qualifier selection and is read by a good deal
 # of framework and app code to decide it is on a small round screen.

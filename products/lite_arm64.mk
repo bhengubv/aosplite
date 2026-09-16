@@ -58,6 +58,18 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/generic_system.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/board/generic_arm64/device.mk)
 
+# All 174 system features.
+#
+# Note what this means: the image DECLARES all of them, and PackageManager
+# reports a declared feature as present without consulting the hardware. On
+# a board that lacks one, an app querying hasSystemFeature() gets true and
+# takes a path that fails.
+#
+# That is the trade for a complete set. A device port should narrow this to
+# the sets its board supports - features.mk lists all 15.
+AOSPLITE_FEATURE_SETS := all
+$(call inherit-product, device/aosplite/features.mk)
+
 PRODUCT_NAME   := lite_arm64
 PRODUCT_DEVICE := generic_arm64
 PRODUCT_BRAND  := AOSPLite

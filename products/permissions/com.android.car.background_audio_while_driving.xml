@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  com.android.car.background_audio_while_driving
+
+  Automotive: audio may continue in the background while driving. Declared by packages/services/Car, not by frameworks.
+
+  Declaring a feature makes PackageManager report it as present on every
+  device running the image. Copy this only into a product whose devices
+  genuinely have the capability.
+-->
+<permissions>
+    <feature name="com.android.car.background_audio_while_driving" />
+</permissions>

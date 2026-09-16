@@ -71,6 +71,17 @@ PRODUCT_MODEL  := AOSPLite Desktop
 PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/pc_core_hardware.xml:system/etc/permissions/pc_core_hardware.xml
 
+# All 174 system features - see lite_arm64.mk for what declaring them all
+# means. android.hardware.type.pc ends up declared twice: once inline by
+# pc_core_hardware.xml above, once by its standalone XML in the formfactor
+# set. Two files declaring one feature is harmless - PackageManager reads
+# both - but drop one if you want the image tidy.
+AOSPLITE_FEATURE_SETS := all
+$(call inherit-product, device/aosplite/features.mk)
+
+# Build-time counterpart to the XML above - see watch_arm64.mk.
+RELEASE_SYSTEM_FEATURE_PC := 0
+
 # Read by resource selection and by apps deciding on a desktop layout.
 PRODUCT_CHARACTERISTICS := tablet,nosdcard
 

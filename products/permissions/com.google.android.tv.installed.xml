@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  com.google.android.tv.installed
+
+  Google TV marker. No upstream file; declared by TV products outside frameworks.
+
+  Declaring a feature makes PackageManager report it as present on every
+  device running the image. Copy this only into a product whose devices
+  genuinely have the capability.
+-->
+<permissions>
+    <feature name="com.google.android.tv.installed" />
+</permissions>

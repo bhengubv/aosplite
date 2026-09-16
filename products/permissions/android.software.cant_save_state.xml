@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android.software.cant_save_state
+
+  AOSP declares this only inside a composite profile
+  (pc_core_hardware.xml, which declares 27 features including
+  android.hardware.type.pc). Copying that profile to obtain this one
+  feature would declare the entire PC form factor as a side effect.
+
+  Standalone declaration so the feature can be taken on its own.
+-->
+<permissions>
+    <feature name="android.software.cant_save_state" />
+</permissions>

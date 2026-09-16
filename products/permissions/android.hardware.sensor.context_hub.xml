@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android.hardware.sensor.context_hub
+
+  Context Hub (CHRE). Declared by devices with a context hub HAL.
+
+  No XML in frameworks/native/data/etc declares this at android-16.0.0_r4,
+  and no composite profile there does either - checked by indexing every
+  <feature name=...> in all 170 files, not by filename.
+-->
+<permissions>
+    <feature name="android.hardware.sensor.context_hub" />
+</permissions>

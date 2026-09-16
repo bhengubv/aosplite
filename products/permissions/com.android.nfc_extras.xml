@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  com.android.nfc_extras
+
+  NFC extras API. Declared by the NFC app's own permissions file on devices that ship it, not by frameworks.
+
+  No XML in frameworks/native/data/etc declares this at android-16.0.0_r4,
+  and no composite profile there does either - checked by indexing every
+  <feature name=...> in all 170 files, not by filename.
+-->
+<permissions>
+    <feature name="com.android.nfc_extras" />
+</permissions>

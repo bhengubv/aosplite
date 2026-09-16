@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  com.google.android.tv.mdns_offload
+
+  mDNS offload support on TV hardware. No upstream file.
+
+  Declaring a feature makes PackageManager report it as present on every
+  device running the image. Copy this only into a product whose devices
+  genuinely have the capability.
+-->
+<permissions>
+    <feature name="com.google.android.tv.mdns_offload" />
+</permissions>

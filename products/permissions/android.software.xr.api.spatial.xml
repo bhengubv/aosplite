@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android.software.xr.api.spatial
+
+  AOSP ships no XML for this feature at android-16.0.0_r4 - verified against
+  frameworks/native/data/etc, 170 files, none matching. Android XR spatial API level 1.
+
+  Declaring a feature makes PackageManager report it unconditionally. Only
+  copy this into a product whose devices actually have the capability.
+-->
+<permissions>
+    <feature name="android.software.xr.api.spatial" version="1" />
+</permissions>

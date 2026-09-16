@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android.software.car.templates_host
+
+  Automotive software feature. AOSP declares these inside
+  packages/services/Car, which is not part of frameworks/native/data/etc
+  and is not synced by a GSI tree. Verified absent at android-16.0.0_r4.
+
+  Software-only: it describes what the car shell supports, not what the
+  board has. Safe to declare for any Circle automotive build.
+-->
+<permissions>
+    <feature name="android.software.car.templates_host" />
+</permissions>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  com.google.android.mainline.patchlevel.2
+
+  Mainline module patch level marker. Normally emitted by the mainline build; declared here so the feature set is complete.
+
+  No XML in frameworks/native/data/etc declares this at android-16.0.0_r4,
+  and no composite profile there does either - checked by indexing every
+  <feature name=...> in all 170 files, not by filename.
+-->
+<permissions>
+    <feature name="com.google.android.mainline.patchlevel.2" />
+</permissions>
