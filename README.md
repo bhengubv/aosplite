@@ -17,10 +17,10 @@ No promises. Use it, or don't.
 
 | | |
 |---|---|
-| `manifests/` | Five prune tiers, plus one opt-in extra |
+| `manifests/` | Five prune tiers, one opt-in extra, and hardened_malloc |
 | `products/` | Three optional `lunch` targets: generic, watch, desktop |
 | `tools/` | Init, the checks, the build wrapper, the flash pipeline, per-release maintenance |
-| `patches/` | Changes to AOSP projects that have no repo of their own to hold them |
+| `patches/` | Changes to AOSP projects that have no repo of their own to hold them — including the hardened_malloc wiring, applied by default |
 | `docs/TUTORIAL.md` | **Start here to build and flash** — clone to booted device, end to end |
 | `docs/RATIONALE.md` | What was cut and why |
 | `docs/EMULATOR.md` | Running what you built, on Cuttlefish or raw QEMU |

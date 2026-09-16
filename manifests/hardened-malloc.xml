@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  hardened_malloc - GrapheneOS.
+
+  Chapter 03 section 2.2 specifies it as the system-wide allocator. AOSP
+  ships Scudo, selected in bionic/libc/Android.bp by
+  libc_native_allocator_defaults: whole_static_libs libscudo, -DUSE_SCUDO.
+  That is the seam this replaces.
+
+  Branch, not tag. The repository's tags are Android 13-era build IDs
+  (TQ2A..., TQ3A...) and refs/tags/13 is the Android 13 line - pinning
+  either against an Android 16 tree pairs an allocator with a bionic it was
+  never built against. Upstream tracks AOSP by branch: 13, 14, 16-qpr2, 17.
+  16-qpr2 is the one that matches android-16.0.0_r4.
+
+  This moves under us when upstream moves. That is the trade for being on a
+  branch their README says is the only supported form, and it is the reason
+  the allocator is worth re-checking on every sync rather than assumed.
+-->
+<manifest>
+  <remote name="grapheneos" fetch="https://github.com/GrapheneOS/" />
+  <project path="external/hardened_malloc"
+           name="hardened_malloc"
+           remote="grapheneos"
+           revision="refs/heads/16-qpr2"
+           clone-depth="1" />
+</manifest>

@@ -1,0 +1,73 @@
+diff --git a/libc/Android.bp b/libc/Android.bp
+index 21f91e5..77760f2 100644
+--- a/libc/Android.bp
++++ b/libc/Android.bp
+@@ -54,7 +54,12 @@ cc_defaults {
+     name: "libc_defaults",
+     defaults: ["linux_bionic_supported"],
+     cflags: libc_common_flags + [
+-        "-DUSE_SCUDO",
++        // CircleOS: hardened_malloc replaces Scudo as the system allocator
++        // (chapter 03 section 2.2). malloc_common.h turns this into
++        // Malloc(x) -> h_x, matching -DH_MALLOC_PREFIX in
++        // external/hardened_malloc/Android.bp.
++        "-DUSE_HARDENED_MALLOC",
++        "-DH_MALLOC_PREFIX",
+     ],
+     asflags: libc_common_flags,
+     conlyflags: ["-std=gnu99"],
+@@ -172,21 +177,22 @@ cc_defaults {
+     name: "libc_native_allocator_defaults",
+ 
+     whole_static_libs: [
+-        "libscudo",
++        "libhardened_malloc",
+     ],
+     cflags: [
+-        "-DUSE_SCUDO",
++        "-DUSE_HARDENED_MALLOC",
++        "-DH_MALLOC_PREFIX",
+     ],
+     header_libs: ["gwp_asan_headers"],
+     product_variables: {
+         malloc_low_memory: {
+-            cflags: ["-UUSE_SCUDO"],
++            cflags: ["-UUSE_HARDENED_MALLOC", "-UH_MALLOC_PREFIX"],
+             whole_static_libs: [
+                 "libjemalloc5",
+                 "libc_jemalloc_wrapper",
+             ],
+             exclude_static_libs: [
+-                "libscudo",
++                "libhardened_malloc",
+             ],
+         },
+     },
+diff --git a/libc/bionic/malloc_common.h b/libc/bionic/malloc_common.h
+index 4afcc4a..62a1591 100644
+--- a/libc/bionic/malloc_common.h
++++ b/libc/bionic/malloc_common.h
+@@ -55,7 +55,22 @@ __END_DECLS
+ 
+ #else // __has_feature(hwaddress_sanitizer)
+ 
+-#if defined(USE_SCUDO)
++#if defined(USE_HARDENED_MALLOC)
++
++// CircleOS: GrapheneOS hardened_malloc. Built with -DH_MALLOC_PREFIX, so the
++// entry points are h_malloc, h_free and so on; this macro is the whole of the
++// binding, exactly as the Scudo branch below is.
++//
++// Note what is NOT here: the USE_SCUDO blocks in heap_tagging.cpp,
++// libc_init_common.cpp and malloc_common_dynamic.cpp call
++// scudo_malloc_disable_memory_tagging() and
++// scudo_malloc_set_track_allocation_stacks(). Those compile out now, so ARM
++// MTE is no longer driven through the allocator. hardened_malloc has its own
++// MTE support (HAS_ARM_MTE in its Android.bp) and wiring it is separate work.
++#include <h_malloc.h>
++#define Malloc(function)  h_ ## function
++
++#elif defined(USE_SCUDO)
+ 
+ #include "scudo.h"
+ #define Malloc(function)  scudo_ ## function

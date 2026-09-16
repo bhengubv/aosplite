@@ -6,8 +6,18 @@ than an edit you will lose and then spend a night rediscovering.
 
 Apply with:
 
+    tools/apply-patches.sh ~/android
+
+It is idempotent - a patch already in the tree is detected and skipped - and
+`tools/os.sh` runs it on every sync, because a `repo sync` done outside
+os.sh is invisible from inside it. Doing them by hand still works:
+
     cd ~/android/<project>
     git apply /path/to/aosplite/patches/<file>.patch
+
+Adding a patch means adding its project to `project_for()` in
+apply-patches.sh. A patch with no mapping is skipped with a warning rather
+than guessed at.
 
 ## 0001-sepolicy-add-memfd_file-class.patch
 
@@ -61,3 +71,58 @@ will not boot, named in full.
 from a tree at least as new as the device's vendor image.** If you cannot,
 expect to add whatever classes its vendor policy references, and use the
 offline compile above to find them one at a time.
+
+
+## hardened_malloc — 0002, 0003, 0004
+
+**Projects:** `bionic`, `build/soong`, `build/make`
+**Needed when:** always. These three plus `manifests/hardened-malloc.xml`
+are the whole hardened_malloc integration, and `tools/init.sh` installs the
+manifest by default.
+
+AOSP ships Scudo. Chapter 03 section 2.2 of the Circle OS specification
+names GrapheneOS `hardened_malloc` as the system allocator instead, and
+these patches are the seam:
+
+| Patch | Project | What it does |
+|---|---|---|
+| 0002 | `bionic` | `-DUSE_HARDENED_MALLOC`, `-DH_MALLOC_PREFIX`, and the `Malloc(x) -> h_x` binding in `malloc_common.h` |
+| 0003 | `build/soong` | a product variable `external/hardened_malloc` reads to enable ARM MTE |
+| 0004 | `build/make` | the same variable on the Make side |
+
+### Why both defines, and what happens with only one
+
+This cost a build. `bionic/libc/Android.bp` set `-DUSE_HARDENED_MALLOC`
+and the comment beside it said it matched `-DH_MALLOC_PREFIX` in
+`external/hardened_malloc/Android.bp` — which does set it, at line 12.
+bionic did not.
+
+`external/hardened_malloc/include/h_malloc.h` line 12 reads:
+
+```c
+#ifndef H_MALLOC_PREFIX
+#define h_malloc_usable_size malloc_usable_size
+```
+
+So without the define, every `h_` name aliased straight back to the plain
+one, and `malloc_common.cpp` hit bionic's own guard:
+
+```
+malloc.h:133: __clang_error_if(_FORTIFY_SOURCE >= 3,
+  "malloc_usable_size() and _FORTIFY_SOURCE>=3 are incompatible")
+```
+
+The build failed at 18% in `malloc_common.o`, roughly 90 minutes in,
+because bionic is deep in the graph. `h_malloc.c:1846` already exported
+the real symbol — the header was simply defining it away.
+
+`tools/check-product.sh` check 8 now compares the two sides and fails fast
+if they disagree.
+
+### What silently reverts
+
+If these patches are lost — a `repo sync` is enough — the build does not
+fail. bionic falls back to Scudo, the image boots, and nothing reports it.
+The specification still claims hardened_malloc; the device no longer has
+it. That is why `os.sh` reapplies on every run rather than trusting the
+tree.

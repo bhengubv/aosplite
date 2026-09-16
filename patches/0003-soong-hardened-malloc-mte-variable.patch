@@ -1,0 +1,37 @@
+diff --git a/android/variable.go b/android/variable.go
+index bef4059..4b0ee9e 100644
+--- a/android/variable.go
++++ b/android/variable.go
+@@ -65,6 +65,13 @@ type variableProperties struct {
+ 			Enabled proptools.Configurable[bool] `android:"arch_variant,replace_instead_of_append"`
+ 		} `android:"arch_variant"`
+ 
++		// CircleOS: external/hardened_malloc reacts to this to enable its
++		// ARM MTE support. It is a GrapheneOS product variable, not an AOSP
++		// one, so the allocator's own Android.bp does not build without it.
++		Device_has_arm_mte struct {
++			Cflags []string `android:"arch_variant"`
++		} `android:"arch_variant"`
++
+ 		Malloc_low_memory struct {
+ 			Cflags              []string `android:"arch_variant"`
+ 			Shared_libs         []string `android:"arch_variant"`
+@@ -291,6 +298,7 @@ type ProductVariables struct {
+ 	Unbundled_build_image        *bool    `json:",omitempty"`
+ 	Always_use_prebuilt_sdks     *bool    `json:",omitempty"`
+ 	Skip_boot_jars_check         *bool    `json:",omitempty"`
++	Device_has_arm_mte           *bool    `json:",omitempty"`
+ 	Malloc_low_memory            *bool    `json:",omitempty"`
+ 	Malloc_zero_contents         *bool    `json:",omitempty"`
+ 	Malloc_pattern_fill_contents *bool    `json:",omitempty"`
+@@ -856,6 +864,10 @@ func (v *ProductVariables) SetDefaultConfig() {
+ 		AAPTCharacteristics: stringPtr("nosdcard"),
+ 		AAPTPrebuiltDPI:     []string{"xhdpi", "xxhdpi"},
+ 
++		// Off by default. A product that knows its silicon has MTE sets
++		// this; claiming it on hardware without MTE would build
++		// -march=armv8-a+memtag code that faults on first use.
++		Device_has_arm_mte:           boolPtr(false),
+ 		Malloc_low_memory:            boolPtr(false),
+ 		Malloc_zero_contents:         boolPtr(true),
+ 		Malloc_pattern_fill_contents: boolPtr(false),

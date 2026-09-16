@@ -34,7 +34,17 @@ for n in $(seq 1 "$TIERS"); do
     echo "installed $(basename "$src")"
 done
 
+# hardened_malloc is not in the AOSP manifest - it is fetched from
+# GrapheneOS. Installed by default because chapter 03 section 2.2 specifies
+# it as the system allocator, and because a secure default that has to be
+# opted into is not a default.
+if [ -f "$SELF/manifests/hardened-malloc.xml" ]; then
+    cp "$SELF/manifests/hardened-malloc.xml" .repo/local_manifests/
+    echo "installed hardened-malloc.xml (external/hardened_malloc)"
+fi
+
 echo
 echo "Tiers installed. Next:"
 echo "  repo sync -c -j4 --no-clone-bundle --prune"
 echo "  $SELF/tools/verify-manifest.sh $SELF/manifests"
+echo "  $SELF/tools/apply-patches.sh $DIR   # hardened_malloc wiring"

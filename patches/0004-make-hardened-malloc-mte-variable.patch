@@ -1,0 +1,14 @@
+diff --git a/core/soong_config.mk b/core/soong_config.mk
+index 44aced2..0bca49d 100644
+--- a/core/soong_config.mk
++++ b/core/soong_config.mk
+@@ -153,6 +153,9 @@ $(call add_json_str,  VendorApiLevelPropOverride,        $(BOARD_API_LEVEL_PROP_
+ $(call add_json_list, ExtraVndkVersions,                 $(PRODUCT_EXTRA_VNDK_VERSIONS))
+ $(call add_json_list, DeviceSystemSdkVersions,           $(BOARD_SYSTEMSDK_VERSIONS))
+ $(call add_json_list, Platform_systemsdk_versions,       $(PLATFORM_SYSTEMSDK_VERSIONS))
++# CircleOS: external/hardened_malloc enables its ARM MTE support on this.
++# Set DEVICE_HAS_ARM_MTE := true in a BoardConfig for silicon that has it.
++$(call add_json_bool, Device_has_arm_mte,               $(filter true,$(DEVICE_HAS_ARM_MTE)))
+ $(call add_json_bool, Malloc_low_memory,                 $(findstring true,$(MALLOC_SVELTE) $(MALLOC_LOW_MEMORY)))
+ $(call add_json_bool, Malloc_zero_contents,              $(call invert_bool,$(filter false,$(MALLOC_ZERO_CONTENTS))))
+ $(call add_json_bool, Malloc_pattern_fill_contents,      $(MALLOC_PATTERN_FILL_CONTENTS))
