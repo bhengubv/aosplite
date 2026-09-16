@@ -398,6 +398,169 @@ else
     ok "no resource defined twice in the same module and configuration"
 fi
 
+# ================== 6. PRODUCT_COPY_FILES naming a source that is not there
+#
+# ninja stops at packaging with
+#   'path/to/thing', needed by 'out/.../thing', missing and no known rule
+# which is the END of the build, after every compile has been paid for.
+#
+# preflight.sh catches this only when the path is inside a PRUNED project.
+# A source that simply does not exist - a feature XML nobody wrote, a
+# permissions file with a typo in its name - is invisible to it.
+#
+# 2026-09-16: adding 17 feature XMLs referenced 4 that had no file anywhere
+# (android.hardware.type.pc and three android.software.car.*). Caught by
+# reading, not by a tool. This is that tool.
+printf '\n%s== 6. PRODUCT_COPY_FILES sources ==%s\n' "$BOLD" "$OFF"
+note "a missing source fails at packaging, after all the compile time"
+
+mapfile -t mkfiles < <(
+    find "$TREE/vendor" "$TREE/device" "$TREE/build/circle" -name "*.mk" \
+         -not -path "*/out/*" 2>/dev/null | head -400)
+
+copy_missing=0; copy_checked=0
+declare -A dest_src
+for mk in "${mkfiles[@]}"; do
+    [ -f "$mk" ] || continue
+    while IFS= read -r pair; do
+        src="${pair%%:*}"; dst="${pair#*:}"
+        case "$src" in ''|*'$'*|\#*) continue ;; esac   # skip unresolved vars
+        copy_checked=$((copy_checked+1))
+        if [ ! -e "$TREE/$src" ]; then
+            bad "$src does not exist
+       referenced by $(echo "$mk" | sed "s#$TREE/##")
+       ninja stops at packaging with \"missing and no known rule to make it\"."
+            copy_missing=$((copy_missing+1))
+        fi
+        # Two different sources for one destination is a silent override -
+        # whichever product is inherited last wins, and nothing says so.
+        if [ -n "${dest_src[$dst]:-}" ] && [ "${dest_src[$dst]}" != "$src" ]; then
+            bad "two sources for one destination: $dst
+       $src
+       ${dest_src[$dst]}
+       One silently overrides the other depending on inherit order."
+        fi
+        dest_src[$dst]="$src"
+    done < <(grep -hoE '[A-Za-z0-9_./$()-]+\.(xml|txt|json|conf|rc|cfg|kl|kcm|so|jar|apk):[A-Za-z0-9_./$()-]+' \
+                  "$mk" 2>/dev/null)
+done
+info "copy pairs checked: $copy_checked"
+[ "$copy_missing" = 0 ] && ok "every PRODUCT_COPY_FILES source exists"
+
+# ============================ 7. system feature declarations
+#
+# A feature name is a bare string. Nothing validates it at build time, so a
+# typo produces perfectly valid XML declaring a feature that does not exist:
+# the build succeeds, the image ships, and the feature is never reported.
+# Nothing ever fails. That is why this check exists.
+#
+# 2026-09-16: android.hardware.telephony.callerid, .callforwarding and
+# .callwaiting were declared and appear ZERO times in frameworks/base.
+# Inert - and invisible without this.
+printf '\n%s== 7. system feature declarations ==%s\n' "$BOLD" "$OFF"
+note "a misspelled feature is valid XML that silently does nothing"
+
+FEAT_DIRS=""
+for d in "$TREE/vendor/circle/permissions" "$TREE/device/aosplite/permissions"; do
+    [ -d "$d" ] && FEAT_DIRS="$FEAT_DIRS $d"
+done
+
+if [ -z "$FEAT_DIRS" ]; then
+    ok "no local feature declarations to check"
+else
+    KNOWN=$(mktemp); trap 'rm -f "$KNOWN"' EXIT
+    ls "$TREE/frameworks/native/data/etc"/*.xml 2>/dev/null |
+        xargs -n1 basename 2>/dev/null | sed 's/\.xml$//' > "$KNOWN"
+    grep -rhoE 'FEATURE_[A-Z0-9_]+ *= *"[^"]+"' \
+         "$TREE/frameworks/base/core/java/android/content/pm/PackageManager.java" \
+         2>/dev/null | grep -oE '"[^"]+"' | tr -d '"' >> "$KNOWN"
+
+    feat_bad=0; feat_n=0
+    for d in $FEAT_DIRS; do
+        for x in "$d"/*.xml; do
+            [ -f "$x" ] || continue
+            feat_n=$((feat_n+1))
+            stem=$(basename "$x" .xml)
+
+            if ! python3 -c 'import sys,xml.etree.ElementTree as E; E.parse(sys.argv[1])' "$x" 2>/dev/null; then
+                bad "$(basename "$x") is not well-formed XML - PackageManager
+       skips the whole file, so every feature in it is silently absent."
+                feat_bad=$((feat_bad+1)); continue
+            fi
+
+            decl=$(grep -oE '<feature name="[^"]+"' "$x" | sed 's/.*name="//;s/"//')
+            [ -n "$decl" ] || { bad "$(basename "$x") declares no <feature>"; feat_bad=$((feat_bad+1)); continue; }
+
+            for nm in $decl; do
+                if [ "$nm" != "$stem" ]; then
+                    bad "$(basename "$x") declares '$nm' - filename and feature disagree.
+       Harmless to the build, and the next person greps the wrong name."
+                    feat_bad=$((feat_bad+1))
+                elif ! grep -qxF "$nm" "$KNOWN" 2>/dev/null; then
+                    # Not automatically wrong: AOSP ships no constant for
+                    # type.watch or the automotive set because no AOSP
+                    # product is one. But it is where a typo shows up.
+                    hits=$(grep -rl "$nm" "$TREE/frameworks/base" "$TREE/frameworks/native" 2>/dev/null | head -1 | wc -l)
+                    if [ "$hits" = 0 ]; then
+                        warn "$nm is declared and appears NOWHERE in frameworks.
+       Either a typo, or a feature the platform does not define - in which
+       case nothing can ever query it and the declaration is inert."
+                    else
+                        info "$nm - no AOSP constant, but the framework references it"
+                    fi
+                fi
+            done
+        done
+    done
+    info "feature XMLs checked: $feat_n"
+    [ "$feat_bad" = 0 ] && ok "all feature declarations well-formed and self-consistent"
+fi
+
+# ======================== 8. allocator defines agreeing with each other
+#
+# 2026-09-16, and the reason this check exists: bionic/libc/Android.bp set
+# -DUSE_HARDENED_MALLOC, and malloc_common.h's comment said it matched
+# "-DH_MALLOC_PREFIX in external/hardened_malloc/Android.bp". The library
+# did set it. bionic did not.
+#
+# So h_malloc.h's  #ifndef H_MALLOC_PREFIX  block fired and aliased every
+# h_ name back to the plain one, and malloc_common.cpp hit bionic's own
+# guard forbidding malloc_usable_size() under _FORTIFY_SOURCE=3.
+#
+# The build ran for 94 minutes and died at 18%, in bionic, which is near
+# the end of the dependency graph. Two greps would have found it.
+printf '\n%s== 8. allocator flags ==%s\n' "$BOLD" "$OFF"
+note "the hardened_malloc binding needs the same define on both sides"
+
+BP="$TREE/bionic/libc/Android.bp"
+HP="$TREE/external/hardened_malloc/Android.bp"
+if [ ! -f "$BP" ] || [ ! -f "$HP" ]; then
+    ok "hardened_malloc not in this tree - nothing to check"
+else
+    b_use=$(grep -c '"-DUSE_HARDENED_MALLOC"' "$BP" 2>/dev/null || echo 0)
+    if [ "$b_use" = 0 ]; then
+        ok "bionic does not use hardened_malloc"
+    else
+        b_pfx=$(grep -c '"-DH_MALLOC_PREFIX"' "$BP" 2>/dev/null || echo 0)
+        h_pfx=$(grep -c '"-DH_MALLOC_PREFIX"' "$HP" 2>/dev/null || echo 0)
+        info "bionic: USE_HARDENED_MALLOC x$b_use, H_MALLOC_PREFIX x$b_pfx"
+        info "library: H_MALLOC_PREFIX x$h_pfx"
+        if [ "$h_pfx" -gt 0 ] && [ "$b_pfx" = 0 ]; then
+            bad "external/hardened_malloc builds WITH -DH_MALLOC_PREFIX and bionic
+       compiles WITHOUT it. h_malloc.h then aliases h_malloc_usable_size
+       back to malloc_usable_size, which bionic forbids under
+       _FORTIFY_SOURCE=3. The build dies in bionic, ~90 minutes in.
+       Add \"-DH_MALLOC_PREFIX\" beside every \"-DUSE_HARDENED_MALLOC\"
+       in bionic/libc/Android.bp."
+        elif [ "$h_pfx" = 0 ] && [ "$b_pfx" -gt 0 ]; then
+            bad "bionic expects prefixed symbols but the library is not built with
+       -DH_MALLOC_PREFIX. Every h_ symbol will be undefined at link."
+        else
+            ok "both sides agree on H_MALLOC_PREFIX"
+        fi
+    fi
+fi
+
 printf '\n%s== summary ==%s\n' "$BOLD" "$OFF"
 printf '  %d blocking, %d advisory\n' "$FAILS" "$WARNS"
 if [ "$FAILS" -gt 0 ]; then

@@ -51,7 +51,8 @@ AUTO_FIX=1                 # close the loop by default: fix, learn, rebuild
 REPORT_EVERY=1200          # seconds between progress lines during a build
 STATUS_DIR=""              # where to publish status; auto-detected on WSL
 RULES=""                   # tools/failure-rules.txt; set once SELF is known
-PHASES="doctor sync check build verify preflight-flash flash boot"
+PHASES="doctor sync modules check build verify preflight-flash flash boot"
+PHASES_SET=0               # did the caller name the phases themselves?
 VBMETA=""                  # factory vbmeta, flashed with verification off
 IMG=""                     # system image to flash; default: newest built
 CONTROL=""                 # known-good image to flash INSTEAD, as a control
@@ -62,6 +63,9 @@ SERIAL=""                  # adb/fastboot serial, if more than one device
 BOOT_TIMEOUT=2400          # 40 min; a first boot on a wiped device is slow
 BOOT_STALL=900             # 15 min with no new service = hung
 FACTORY=""                 # unzipped factory image, for rescuing the log
+INSTALL="flash"            # flash | dsu - how the image gets onto the device
+DSU_USERDATA=8589934592    # 8 GiB slice for the DSU instance's own userdata
+MODULES=""                 # CircleOS/modules - overlay packages to add to the build
 
 usage() {
     sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
@@ -77,8 +81,9 @@ Options
   --target T             default systemimage
   --reference IMG        GSI to verify the built image against
   --jobs N               default nproc
-  --phases "a b c"       run only these: doctor sync check build verify
-                         preflight-flash flash boot
+  --phases "a b c"       run only these: doctor sync modules check build
+                         verify preflight-flash flash boot, or dsu in
+                         place of preflight-flash/flash
   --vbmeta IMG           vbmeta from the FACTORY image, flashed with
                          verification disabled. Not an empty one: a vbmeta
                          with no descriptors leaves the bootloader with no
@@ -98,6 +103,22 @@ Options
                          boot, os.sh restores from this and reads the
                          kernel log automatically - the log is perishable
                          and deciding what to do costs it
+  --modules DIR          CircleOS/modules. Each subdirectory holding
+                         Android.bp + AndroidManifest.xml + patch_reg.py is
+                         copied to vendor/circle/apps/<name> and registered
+                         in PRODUCT_PACKAGES. Runs BEFORE check, so
+                         check-product sees the modules it is meant to
+                         catch problems in. Idempotent - a module already
+                         in the tree is left alone
+  --dsu                  install with DSU instead of flashing. A temporary
+                         image inside userdata: stock is untouched, nothing
+                         is erased, and a boot that fails falls back to
+                         stock by itself. Proves the IMAGE. It never
+                         touches vbmeta, verity or the partition write, so
+                         it cannot prove the INSTALL - flash for that.
+                         Unless --phases is given, this replaces the
+                         preflight-flash and flash phases with dsu
+  --dsu-userdata BYTES   userdata slice for the DSU instance, default 8 GiB
   --retries N            default 8
   --report-every SECS    progress line during a build, default 1200 (20 min)
   --no-auto-fix          stop on the first failure instead of fixing it.
@@ -127,7 +148,7 @@ while [ $# -gt 0 ]; do
         --target) TARGET="$2"; shift ;;
         --reference) REFERENCE="$2"; shift ;;
         --jobs) JOBS="$2"; shift ;;
-        --phases) PHASES="$2"; shift ;;
+        --phases) PHASES="$2"; PHASES_SET=1; shift ;;
         --retries) MAX_RETRIES="$2"; shift ;;
         --report-every) REPORT_EVERY="$2"; shift ;;
         --auto-fix) AUTO_FIX=1 ;;
@@ -142,6 +163,9 @@ while [ $# -gt 0 ]; do
         --no-wipe) WIPE=0 ;;
         --boot-timeout) BOOT_TIMEOUT="$2"; shift ;;
         --factory-image) FACTORY="$2"; shift ;;
+        --modules) MODULES="$2"; shift ;;
+        --dsu) INSTALL=dsu ;;
+        --dsu-userdata) DSU_USERDATA="$2"; shift ;;
         -h|--help) usage 0 ;;
         *) echo "unknown option: $1" >&2; usage 1 ;;
     esac
@@ -150,6 +174,25 @@ done
 
 [ -n "$MODE" ] || { echo "choose --lite or --aosp" >&2; usage 1; }
 [ -n "$PRODUCT" ] || PRODUCT=$([ "$MODE" = lite ] && echo lite_arm64 || echo aosp_arm64)
+
+# --dsu swaps the two flash phases for the dsu phase, unless the caller has
+# said explicitly what they want. Doing it here rather than making the user
+# retype --phases is the difference between a flag people use and a flag
+# people get wrong: "--dsu --phases ... flash ..." would silently wipe the
+# device it was chosen to protect.
+if [ "$INSTALL" = dsu ] && [ "$PHASES_SET" != 1 ]; then
+    PHASES="doctor sync modules check build verify dsu boot"
+fi
+case " $PHASES " in
+    *" dsu "*)
+        case " $PHASES " in
+            *" flash "*)
+                echo "refusing: dsu and flash in the same run." >&2
+                echo "  dsu leaves the device untouched; flash wipes it." >&2
+                echo "  Pick one - they answer different questions." >&2
+                exit 1 ;;
+        esac ;;
+esac
 LUNCH="$PRODUCT-$RELEASE-$VARIANT"
 LOG="$TREE/out/os-sh.log"
 RULES="${RULES:-$SELF/tools/failure-rules.txt}"
@@ -202,8 +245,7 @@ find_tool() {
 
     if command -v wslpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
         local up
-        up=$(cd /mnt/c 2>/dev/null && cmd.exe /c 'echo %LOCALAPPDATA%' 2>/dev/null | tr -d '
-')
+        up=$(cd /mnt/c 2>/dev/null && cmd.exe /c 'echo %LOCALAPPDATA%' 2>/dev/null | tr -d '\r')
         [ -n "$up" ] && up=$(wslpath -u "$up" 2>/dev/null || true)
         for c in "$up/Android/Sdk/platform-tools/$want.exe"                  "/mnt/c/platform-tools/$want.exe"                  "/usr/lib/android-sdk/platform-tools/$want"; do
             if [ -x "$c" ]; then eval "$var='$c'"; return 0; fi
@@ -345,6 +387,122 @@ if runs sync; then
         info "repo sync -j$JOBS - this is the long download"
         ( cd "$TREE" && repo sync -c -j"$JOBS" --no-clone-bundle --prune --force-sync )
         info "synced: $(du -sh "$TREE" 2>/dev/null | cut -f1)"
+    fi
+
+    # Every run, not only after a fresh sync. repo sync overwrites the
+    # projects these patch, and a sync done outside os.sh is invisible from
+    # here - so the only safe assumption is that the tree may have lost
+    # them. apply-patches.sh is idempotent, so this costs a second.
+    #
+    # It matters because of what silently reverts: without the bionic patch
+    # the allocator falls back to Scudo and nothing says so. The build
+    # succeeds, the image boots, and chapter 03 section 2.2 quietly stops
+    # being true.
+    if [ -f "$SELF/tools/apply-patches.sh" ]; then
+        set +e
+        out=$(bash "$SELF/tools/apply-patches.sh" "$TREE" 2>&1); rc=$?
+        set -e
+        echo "$out" | sed -n "s/^  /    /p" | grep -vE "already present|^\s*$" | head -8
+        [ "$rc" = 0 ] || die "a patch would not apply - the tree is missing a change
+  the build expects. Output above."
+        info "patches: $(echo "$out" | grep -oE "[0-9]+ applied, [0-9]+ already present")"
+    fi
+fi
+
+# ================================================================ modules
+#
+# CircleOS/modules holds overlay packages that are not in the tree: each is
+# a directory with Android.bp, AndroidManifest.xml, res/, src/ and a
+# patch_reg.py that inserts the module name into
+# vendor/circle/config/common.mk PRODUCT_PACKAGES.
+#
+# Two details decide whether this works, and both were read out of the
+# module files rather than assumed:
+#
+#   - Android.bp uses relative paths (srcs: ["src/**/*.java"],
+#     resource_dirs: ["res"]), so a module only builds from its own
+#     directory. It is copied whole.
+#   - patch_reg.py opens "config/common.mk" relative to the working
+#     directory, so it has to run with cwd = vendor/circle. Run from
+#     anywhere else it fails to find the file, or edits the wrong one.
+#
+# This phase runs BEFORE check, deliberately. check-product.sh exists to
+# catch a duplicated resource inside one module and a privileged app with
+# no allowlist entry - both of which build cleanly and boot-loop the
+# device. Adding 27 app packages is exactly when those appear, so the
+# checks have to see the tree that is going to be built, not the one
+# before.
+
+if runs modules; then
+    phase "modules"
+
+    if [ -z "$MODULES" ]; then
+        note "no --modules given - nothing to add"
+    else
+        [ -d "$MODULES" ] || die "no module directory at $MODULES"
+        VC="$TREE/vendor/circle"
+        [ -d "$VC" ] || die "no vendor/circle in the tree at $VC.
+  The modules register themselves in vendor/circle/config/common.mk, so
+  the Circle overlay manifest has to be synced first."
+        [ -f "$VC/config/common.mk" ] || die "no $VC/config/common.mk - patch_reg.py
+  has nothing to register into."
+
+        added=0; skipped=0; failed=""
+        for m in "$MODULES"/*/; do
+            m="${m%/}"
+            [ -f "$m/Android.bp" ] || continue
+            [ -f "$m/AndroidManifest.xml" ] || continue
+            [ -f "$m/patch_reg.py" ] || continue
+
+            # The destination is the module's own Soong name, not the
+            # folder name: circleos-desktop declares CircleDesktop, and
+            # that is what PRODUCT_PACKAGES will name.
+            name=$(sed -n 's/^[[:space:]]*name:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                   "$m/Android.bp" | head -1)
+            if [ -z "$name" ]; then
+                failed="$failed $(basename "$m")(no-name)"
+                continue
+            fi
+
+            dest="$VC/apps/$name"
+            if [ -d "$dest" ]; then
+                skipped=$((skipped+1))
+                continue
+            fi
+
+            mkdir -p "$dest"
+            cp "$m/Android.bp" "$m/AndroidManifest.xml" "$dest/" 2>/dev/null || true
+            [ -d "$m/res" ] && cp -r "$m/res" "$dest/"
+            [ -d "$m/src" ] && cp -r "$m/src" "$dest/"
+
+            # Register it. patch_reg.py is already idempotent - it returns 0
+            # and says so if the name is in common.mk - so a re-run is safe.
+            set +e
+            out=$( cd "$VC" && python3 "$m/patch_reg.py" 2>&1 )
+            rc=$?
+            set -e
+            if [ "$rc" != 0 ]; then
+                # Leave the copied files: the next run finds the directory,
+                # skips the copy, and the failure is about common.mk only.
+                failed="$failed $name"
+                note "  $name: $(printf '%s' "$out" | tail -1)"
+                continue
+            fi
+            added=$((added+1))
+            info "$name"
+        done
+
+        info "added $added, already present $skipped"
+        if [ -n "$failed" ]; then
+            die "could not register:$failed
+
+  patch_reg.py inserts the module after an anchor already in
+  PRODUCT_PACKAGES (CircleLauncher among them). If it reports no anchor
+  found, vendor/circle/config/common.mk is not the file it expects.
+  Nothing is half-done: the module sources are copied and registration is
+  all that is outstanding."
+        fi
+        publish "modules: $added added, $skipped already present"
     fi
 fi
 
@@ -744,6 +902,139 @@ device_state() {
     elif adb_ get-state 2>/dev/null | grep -q device; then echo adb
     else echo none; fi
 }
+
+# ==================================================================== dsu
+#
+# Dynamic System Updates: run the image from a temporary logical partition
+# inside userdata, with the installed system left exactly where it is.
+#
+# This exists because the flash path below is expensive in a way that
+# shapes how people work. A flash erases userdata, needs a vbmeta whose
+# disable bits are right for the device, and destroys the kernel log that
+# would explain a failure - one look per attempt, and a wipe to get it. So
+# a bad image costs twenty minutes and an argument about what was actually
+# done to the device.
+#
+# DSU costs a reboot. The stock system is not modified, userdata is not
+# erased, and a boot that does not complete falls back to stock on its
+# own, so the log can be read from a system that is running.
+#
+# What it does NOT do, and this is the whole reason it does not replace
+# the flash phase: it never writes a partition, never touches vbmeta and
+# never exercises verity. It proves the IMAGE boots. It cannot prove the
+# INSTALL works. Both questions have to be answered before a release, and
+# only one of them is cheap.
+#
+# Requirements, all verified on the reference device (Pixel 7a, lynx,
+# 2026-09-16): ro.boot.dynamic_partitions=true, ro.virtual_ab.enabled=true,
+# /system/bin/gsi_tool present, DynamicSystem service registered.
+
+if runs dsu; then
+    phase "dsu"
+
+    find_tool adb ADB
+
+    IMG="${IMG:-$(ls -t "$TREE"/out/target/product/*/system.img 2>/dev/null | head -1)}"
+    [ -n "$IMG" ] && [ -f "$IMG" ] || die "no system.img to install. Build first, or pass --img."
+    info "image : $IMG ($(du -h "$IMG" | cut -f1))"
+
+    # The device has to be BOOTED for this. DSU is installed by the running
+    # system into its own userdata - there is no fastboot involved at any
+    # point, which is exactly why it costs nothing.
+    case "$(device_state)" in
+        fastboot) die "device is in fastboot. DSU is installed by the running
+  system, not by the bootloader. Boot it first:  fastboot reboot" ;;
+        none)     die "no device. Connect it with USB debugging enabled." ;;
+    esac
+
+    # Prerequisites, read off the device rather than assumed. Each of these
+    # produces a different and unhelpful failure if it is missing, and all
+    # four are one getprop away.
+    dsu_dyn=$(adb_ shell getprop ro.boot.dynamic_partitions 2>/dev/null | tr -d '\r')
+    [ "$dsu_dyn" = true ] || die "ro.boot.dynamic_partitions is '${dsu_dyn:-unset}', not true.
+  DSU needs dynamic partitions - there is nowhere to put the image."
+
+    adb_ shell 'test -x /system/bin/gsi_tool' 2>/dev/null ||
+        die "no /system/bin/gsi_tool on the device. DSU is unavailable on
+  this build; use the flash path instead."
+
+    # gsi_tool install writes into the DSU metadata and needs root. On a
+    # userdebug build 'adb root' gives it; on user builds it does not, and
+    # the documented route is the DynamicSystem intent, which puts a
+    # confirmation dialog on the screen. Say which one is happening rather
+    # than letting an unattended run block on a dialog nobody sees.
+    dsu_id=$(adb_ shell id -u 2>/dev/null | tr -d '\r')
+    if [ "$dsu_id" != 0 ]; then
+        info "requesting adb root for gsi_tool"
+        adb_ root >/dev/null 2>&1 || true
+        sleep 4
+        find_tool adb ADB
+        dsu_id=$(adb_ shell id -u 2>/dev/null | tr -d '\r')
+    fi
+    [ "$dsu_id" = 0 ] || die "gsi_tool install needs root and adb root was refused
+  (uid=${dsu_id:-unknown}). This is a user build, or adbd is not rootable.
+  Install it by hand instead - that route asks for confirmation on the
+  device screen:
+      adb push '$IMG' /sdcard/Download/system.img
+      adb shell am start-activity \\
+        -n com.android.dynsystem/com.android.dynsystem.VerificationActivity \\
+        -a android.os.image.action.START_INSTALL \\
+        -d file:///storage/emulated/0/Download/system.img \\
+        --el KEY_USERDATA_SIZE $DSU_USERDATA --ez KEY_ENABLE_WHEN_COMPLETED true"
+
+    # Free space. The image AND the instance's own userdata slice both live
+    # in /data. Running out part-way leaves a half-written DSU slot that
+    # gsi_tool has to wipe before the next attempt, so check first.
+    dsu_sz=$(stat -c %s "$IMG" 2>/dev/null || wc -c < "$IMG")
+    dsu_need=$(( (dsu_sz + DSU_USERDATA) / 1024 / 1024 ))
+    dsu_free=$(adb_ shell 'df -m /data 2>/dev/null | tail -1' 2>/dev/null |
+               tr -d '\r' | awk '{print $4}')
+    info "space : need ~${dsu_need} MB, free ${dsu_free:-?} MB on /data"
+    if [ -n "$dsu_free" ] && [ "$dsu_free" -lt "$dsu_need" ]; then
+        die "not enough room in /data for the image plus a ${DSU_USERDATA}-byte
+  userdata slice. Lower it with --dsu-userdata, or free space."
+    fi
+
+    # A DSU slot left over from a previous run is refused rather than
+    # replaced, and the error does not say so clearly. Clear it first.
+    dsu_state=$(adb_ shell gsi_tool status 2>/dev/null | tr -d '\r' | head -1)
+    info "gsi   : ${dsu_state:-unknown}"
+    case "$dsu_state" in
+        normal|"") ;;
+        *) note "an existing DSU installation is present - wiping it first"
+           adb_ shell gsi_tool wipe >/dev/null 2>&1 || true ;;
+    esac
+
+    # gsi_tool reads the image from stdin, so it streams rather than
+    # needing a second copy on the device. --gsi-size must be the real
+    # byte count; a wrong one produces a truncated image that boots to
+    # nothing.
+    info "installing (streaming $(du -h "$IMG" | cut -f1) over adb - several minutes)"
+    publish "dsu install started $(date '+%H:%M:%S')"
+    set +e
+    adb_ shell "gsi_tool install --userdata-size $DSU_USERDATA --gsi-size $dsu_sz" \
+        < "$IMG" 2>&1 | tail -6 | sed 's/^/    /'
+    dsu_rc="${PIPESTATUS[0]}"
+    set -e
+    [ "$dsu_rc" = 0 ] || die "gsi_tool install failed (exit $dsu_rc). Nothing has changed
+  on the device - the installed system is untouched."
+
+    adb_ shell gsi_tool enable >/dev/null 2>&1 || true
+    ok_state=$(adb_ shell gsi_tool status 2>/dev/null | tr -d '\r' | head -1)
+    info "gsi   : ${ok_state:-unknown} (installed)"
+
+    info "rebooting into the DSU image"
+    publish "dsu installed, rebooting $(date '+%H:%M:%S')"
+    adb_ reboot >/dev/null 2>&1 || true
+    sleep 10
+
+    # The boot phase below does the verifying. It checks for a fingerprint
+    # containing "circle", which is the same question here as after a
+    # flash - and if this image does not boot, the device returns to stock
+    # by itself rather than sitting in fastboot.
+    note "if this image does not boot, the device returns to stock on its own."
+    note "to leave DSU afterwards:  adb shell gsi_tool disable && adb reboot"
+fi
 
 # ======================================================== preflight-flash
 #

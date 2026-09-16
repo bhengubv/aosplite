@@ -360,8 +360,7 @@ PYX
             done
             [ -n "$apk" ] || continue
             af=$(img_get "$IMG" "$apk") || continue
-            pkgname=$("$pf_aapt" dump packagename "$af" 2>/dev/null | tr -d '
-')
+            pkgname=$("$pf_aapt" dump packagename "$af" 2>/dev/null | tr -d '\r')
             [ -n "$pkgname" ] || continue
             pf_scanned=$((pf_scanned+1))
             for perm in $("$pf_aapt" dump permissions "$af" 2>/dev/null |

@@ -284,6 +284,125 @@ if [ -f /var/run/reboot-required ]; then
     say "" "yesterday stops working today."
 fi
 
+# Everything above audits the machine the build runs ON. Under WSL that is
+# not the machine that decides whether the build SURVIVES - the Windows
+# host is, and nothing here used to look at it.
+#
+# 2026-09-16: a build died at 24% after 2h40m. No error, no banner, no OOM,
+# swap untouched - the log simply stopped. Windows Update had restarted the
+# host:
+#     06:37  last build progress line
+#     06:44  MoUsoCoreWorker.exe initiated a restart
+#     06:47  Windows booted
+# check-env had passed that machine clean at 03:54 with five advisories,
+# none of which was this. Active hours were 10:00-03:00, so 03:00-10:00 was
+# a window Windows was free to reboot in, and the build was started at
+# 03:54 - inside it.
+#
+# Windows may restart for updates ONLY outside active hours. So the whole
+# question is: does this build run into that window.
+if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then
+
+    if ! command -v reg.exe >/dev/null 2>&1; then
+        soft "cannot reach the Windows host (no reg.exe on PATH)"
+        say "" "Under WSL the host decides whether a long build survives, and"
+        say "" "this check could not ask it. Treat the host as unchecked."
+    else
+        WU='HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+
+        # reg.exe prints e.g.  ActiveHoursStart  REG_DWORD  0xa
+        regdw() {
+            local raw
+            raw=$(reg.exe query "$1" /v "$2" 2>/dev/null | tr -d '\r' |
+                  awk -v k="$2" '$1==k {print $NF}')
+            raw="${raw#0x}"
+            [ -n "$raw" ] && printf '%d' "$((16#$raw))" 2>/dev/null
+        }
+
+        ah_s=$(regdw "$WU" ActiveHoursStart)
+        ah_e=$(regdw "$WU" ActiveHoursEnd)
+
+        # A host carrying NoAutoRebootWithLoggedOnUsers=1 will not restart
+        # itself for updates while a user is signed in, which turns the
+        # verdict below from fatal into conditional.
+        #
+        # It is NOT a complete answer and must not be reported as one: the
+        # policy is scoped to "with logged on users". Sign out, or let the
+        # session end, and a scheduled restart is free to happen again -
+        # which is the normal state of an overnight build nobody is sitting
+        # at. So it lowers the severity and keeps the warning.
+        AUK='HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
+        no_reboot=$(regdw "$AUK" NoAutoRebootWithLoggedOnUsers)
+
+        if [ -z "$ah_s" ] || [ -z "$ah_e" ]; then
+            soft "Windows Update active hours are not set"
+            say "" "With no active hours, Windows may restart for updates at any"
+            say "" "time. A multi-hour build is at its mercy. Set them, or pause"
+            say "" "updates for the duration."
+        else
+            now_h=$(date +%-H)
+            # Free window is [ActiveHoursEnd, ActiveHoursStart) and it wraps.
+            if [ "$ah_e" -le "$ah_s" ]; then
+                in_free=$([ "$now_h" -ge "$ah_e" ] && [ "$now_h" -lt "$ah_s" ] && echo 1 || echo 0)
+            else
+                in_free=$([ "$now_h" -ge "$ah_e" ] || [ "$now_h" -lt "$ah_s" ] && echo 1 || echo 0)
+            fi
+            until_free=$(( (ah_e - now_h + 24) % 24 ))
+
+            say "winupdate" "active $(printf '%02d:00-%02d:00' "$ah_s" "$ah_e"), so Windows may restart $(printf '%02d:00-%02d:00' "$ah_e" "$ah_s")"
+
+            if [ "$in_free" = 1 ] && [ "${no_reboot:-0}" != 1 ]; then
+                bad "it is $(date +%H:%M) - INSIDE the window Windows may restart in"
+                say "" "A build started now can be killed by a Windows Update reboot"
+                say "" "with no warning and no error in any log. This is exactly how"
+                say "" "a 24%-complete build was lost on 2026-09-16."
+                say "" "Pause updates (Settings > Windows Update > Pause), or set"
+                say "" "NoAutoRebootWithLoggedOnUsers=1 under"
+                say "" "  HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU"
+            elif [ "$in_free" = 1 ]; then
+                soft "it is $(date +%H:%M) - inside the restart window, but held off"
+                say "" "NoAutoRebootWithLoggedOnUsers=1, so Windows will not restart"
+                say "" "on its own WHILE YOU STAY SIGNED IN. That is the whole extent"
+                say "" "of the protection - sign out or let the session end and a"
+                say "" "scheduled restart can still take the build. For a run nobody"
+                say "" "will be sitting at, pause updates as well."
+            elif [ "$until_free" -le 6 ]; then
+                soft "${until_free}h until Windows may restart ($(printf '%02d:00' "$ah_e"))"
+                say "" "An AOSP build takes longer than that. It will still be"
+                say "" "running when the window opens. Pause updates first."
+            else
+                ok "${until_free}h of protected time before the restart window opens"
+            fi
+        fi
+
+        # A reboot already queued will be taken at the first opportunity,
+        # which for a long build means during it.
+        if reg.exe query \
+           'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired' \
+           >/dev/null 2>&1; then
+            bad "the Windows host has a reboot PENDING"
+            say "" "It will be taken as soon as active hours allow, and that will"
+            say "" "be during this build. Reboot the host first, deliberately."
+        else
+            ok "no reboot pending on the Windows host"
+        fi
+
+        # Sleep ends WSL too, and the idle timeout is separate from the
+        # lid and power-button actions. 0 means never.
+        if command -v powercfg.exe >/dev/null 2>&1; then
+            ac_idle=$(powercfg.exe /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>/dev/null |
+                      tr -d '\r' | awk '/Current AC Power Setting Index/{print $NF}')
+            case "$ac_idle" in
+                0x00000000|"") ok "Windows sleep-on-idle (AC) is Never" ;;
+                *) mins=$(( $((16#${ac_idle#0x})) / 60 ))
+                   bad "Windows sleeps after ${mins} min idle on AC"
+                   say "" "WSL is shut down with the host and soong_ui dies with"
+                   say "" "'Got signal: terminated'. Set it to Never for the build." ;;
+            esac
+        fi
+    fi
+fi
+
 echo
 echo "=== out/ ==="
 
